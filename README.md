@@ -24,7 +24,7 @@ Please set up a conda environment (see instructions in [SETUP.md](SETUP.md)).
     
 4. Run AsyncVLA to control the real robot. We split the AsyncVLA into the base VLA and the edge adapter. Then we run the base VLA in the remote workstation and run the edge adapter in the robot edge controller with ROS1. Details are shown in the paper appendix. 
 
-### Training datasets
+### Datasets
 We provide training code that supports multiple public datasets. Before following the full training process, please first ensure that you can run the example training with the sample dataloader.
 
 1. Downloading all datasets from the original website. ([GNM](https://github.com/robodhruv/visualnav-transformer), [LeLaN](https://github.com/NHirose/learning-language-navigation), [SACSoN(HuRoN)](https://sites.google.com/view/sacson-review/home)) Please verify that the downloaded datasets work properly in their original codebase.
