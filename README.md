@@ -59,7 +59,7 @@ We provide the training code along with a sample dataloader to help you quickly 
     ```
     
 ### Acknowledgement
-We implement our ideas and design choices on top of the pretrained checkpoints. Our work builds upon the [OpenVLA-OFT](https://openvla-oft.github.io/) codebase, with additional code added to create OmniVLA. As such, our implementation leverages many components of the OpenVLA-OFT codebase. We sincerely appreciate the effort and contributions of the OpenVLA-OFT team!
+We implement our ideas and design choices on top of the pretrained checkpoints. Our work builds upon the [OpenVLA-OFT](https://openvla-oft.github.io/) codebase, [OmniVLA](https://github.com/NHirose/OmniVLA) codebase and [ViNT](https://github.com/robodhruv/visualnav-transformer) codebase, with additional code added to create AsyncVLA. As such, our implementation leverages many components of these codebases. We sincerely appreciate the effort and contributions of the OpenVLA-OFT, OmniVLA and ViNT team!
 
 ## Citing
 ```
