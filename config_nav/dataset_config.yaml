@@ -15,29 +15,7 @@ context_type: temporal
 normalize: True
 num_workers: 10
 
-#For dataset path and setting
-datasets_CAST:
-  path: /your_cast_data_location/
-
-datasets_frodobots:
-  root: /your_frodobots_data_location
-  horizon_short: 20
-  horizon_long: 100  
-  frodobot:
-    train: 11434305
-    test: 11434305
-    negative_mining: True
-
-datasets_bdd:    
-  train: /your_data_location/data_splits/bdd/train/
-  test: /your_data_location/data_splits/bdd/test/
-  image: /your_bdd_data_location/BDD_dataset
-  pickle: /your_bdd_data_location/BDD_dataset_pickle
-  backside: False
-  aug_seq: False
-  only_front: True
-  waypoint_spacing: 0.12      
-    
+#For dataset path and setting    
 datasets_gnm:
   distance:
     min_dist_cat: 0
@@ -71,13 +49,6 @@ datasets_gnm:
     data_folder: /your_gnm_data_location/tartan_drive
     train: /your_data_location/data_splits/tartan_drive/train/
     test: /your_data_location/data_splits/tartan_drive/test/
-    end_slack: 3
-    goals_per_obs: 1
-    negative_mining: True
-  sacson:
-    data_folder: /your_gnm_data_location/sacson
-    train: /your_data_location/data_splits/sacson/train/
-    test: /your_data_location/data_splits/sacson/test/
     end_slack: 3
     goals_per_obs: 1
     negative_mining: True
@@ -141,3 +112,13 @@ datasets_lelan:
     backside: False
     aug_seq: False 
     only_front: True  
+    
+datasets_sacson:     
+  sacson:
+    train: /your_data_location/data_splits/sacson/train/
+    test: /your_data_location/data_splits/sacson/train/
+    image: /your_data_location/sacson/
+    pickle: /your_data_location/sacson/
+    backside: False
+    aug_seq: False
+    only_front: False    

@@ -142,7 +142,7 @@ class SACSoN_Dataset_rand(Dataset):
                 for subfolder in subfolder_lst:
                     #print(self.data_image_folder + folder + "/" + subfolder + "/" + subfolder + "_" + folder + "_fisheye.txt")
                     with open(self.data_image_folder + folder + "/" + subfolder + "/" + subfolder + "_" + folder + "_fisheye.txt", "r") as f:
-                        fisheye = f.read().replace("fisheye", "fisheye_small").splitlines()            
+                        fisheye = f.read().splitlines() #.replace("fisheye", "fisheye_small")
                         #fisheye = f.read().splitlines()                               
                     with open(self.data_image_folder + folder + "/" + subfolder + "/" + subfolder + "_" + folder + "_odom.txt", "r") as f:
                         odom = f.read().splitlines()   

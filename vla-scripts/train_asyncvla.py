@@ -1,14 +1,14 @@
 """
-train_omnivla.py
+train_asyncvla.py
 
-Train or finetune OmniVLA with LoRA.
+Train or finetune AsyncVLA
 """
 
 # ==============================
 # Configuration Flags
 # ==============================
-TRAIN_MODE = False   # True: training mode, False: debug mode (minimize GPU RAM usage)
-TRAIN_HEAD = True
+TRAIN_BASE = False   # True: training BASE VLA (if True, you need H100 or H200.)
+TRAIN_HEAD = True    # True: training Edge adapter and token projector
 VISUALIZE = False    # True: save visualization images of policy performance
 
 # ==============================
@@ -19,7 +19,6 @@ from pathlib import Path
 
 # Add external project paths if not installed as packages
 sys.path.extend([
-    #"/media/noriaki/Noriaki_Data/Learning-to-Drive-Anywhere-with-MBRA/train/", '/media/noriaki/Noriaki_Data/lerobot'
     "../Learning-to-Drive-Anywhere-with-MBRA/train/", '../lerobot'
 ])
 
@@ -94,30 +93,22 @@ from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, Pr
 
 from prismatic.models.action_heads import L1RegressionActionHead_idcat
 from prismatic.models.backbones.llm.prompting import PurePromptBuilder
-from prismatic.models.film_vit_wrapper import FiLMedPrismaticVisionBackbone
-from prismatic.models.projectors import NoisyActionProjector, ProprioProjector
+from prismatic.models.projectors import ProprioProjector
 from prismatic.training.train_utils import get_current_action_mask, get_next_actions_mask
 
 from prismatic.util.data_utils import PaddedCollatorForActionPrediction_Nav_MMN
 from prismatic.vla.action_tokenizer import ActionTokenizer
 from prismatic.vla.constants import ACTION_DIM, NUM_ACTIONS_CHUNK, POSE_DIM, IGNORE_INDEX
-from prismatic.vla.datasets import RLDSBatchTransform, RLDSDataset
-from prismatic.vla.datasets.dummy_dataset import Dummy_Dataset
-from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
 
 #dataset
-from prismatic.vla.datasets.lelan_dataset import LeLaN_Dataset, LeLaN_Dataset_rand
-from prismatic.vla.datasets.gnm_dataset import GNM_Dataset, GNM_Dataset_rand
-from prismatic.vla.datasets.bdd_dataset import BDD_Dataset, BDD_Dataset_rand
-from prismatic.vla.datasets.cast_dataset import CAST_Dataset
+from prismatic.vla.datasets.dummy_dataset import Dummy_Dataset
+from prismatic.vla.datasets.lelan_dataset import LeLaN_Dataset_rand
+from prismatic.vla.datasets.gnm_dataset import GNM_Dataset_rand
 from prismatic.vla.datasets.sacson_dataset import SACSoN_Dataset_rand
-from prismatic.vla.datasets.frodobots_dataset import Frodobots_Dataset, Frodobots_Dataset_rand, EpisodeSampler_Frodobots
 from prismatic.vla.datasets.dummy_dataset import Dummy_Dataset
 
-from vint_train.models.exaug.exaug import ExAug_dist_delay
-
 #small head model
-from prismatic.models.small_head import Small_head_idcat, Small_head_notrans, Small_head_one, Small_head_img, Small_head_img_pd2, Small_head_img_pd2_noid, Proj_Actiontokens
+from prismatic.models.small_head import Edge_adapter, Proj_Actiontokens
 
 # ==============================
 # Transform Definition
@@ -206,7 +197,7 @@ class OmniVLAConfig:
     data_root_dir: Path = Path("datasets/rlds")      # Directory containing RLDS datasets
     dataset_name: str = "aloha_scoop_x_into_bowl"    # Name of fine-tuning dataset (e.g., `aloha_scoop_x_into_bowl`)
     #run_root_dir: Path = Path("runs_rand_delta2_fix_ballance")                # Path to directory to store logs & checkpoints
-    run_root_dir: Path = Path("runs_rand_delta3_noid_gnm_lelan_sacson_dist")                # Path to directory to store logs & checkpoints
+    run_root_dir: Path = Path("runs")                # Path to directory to store logs & checkpoints
 
     shuffle_buffer_size: int = 100_000               # Dataloader shuffle buffer size (can reduce if OOM errors occur)
 
@@ -332,7 +323,6 @@ def pose_to_delta(pose):
     pose: [N, T, 4] = [x, y, cosθ, sinθ]
     returns delta: [N, T, 4]
     """
-
     x = pose[..., 0]
     y = pose[..., 1]
     theta = torch.atan2(pose[..., 3], pose[..., 2])
@@ -367,46 +357,6 @@ def pose_to_delta(pose):
     # Stack after loop
     return torch.stack(delta_list, dim=1)
 
-"""
-def pose_to_delta(pose):
-
-    N, T, _ = pose.shape
-
-    # Extract fields
-    x = pose[..., 0]
-    y = pose[..., 1]
-    cos_t = pose[..., 2]
-    sin_t = pose[..., 3]
-
-    theta = torch.atan2(sin_t, cos_t)
-
-    # Output container
-    delta = torch.zeros_like(pose)
-
-    # First pose = reference (no delta)
-    delta[..., 0, :] = pose[..., 0, :]
-
-    # Compute deltas for t >= 1
-    for t in range(1, T):
-        # Difference in world frame
-        dx = x[:, t] - x[:, t-1]
-        dy = y[:, t] - y[:, t-1]
-        dtheta = theta[:, t] - theta[:, t-1]
-
-        # Rotation by inverse of previous heading
-        ct = torch.cos(theta[:, t-1])
-        st = torch.sin(theta[:, t-1])
-
-        dx_local =  ct * dx + st * dy
-        dy_local = -st * dx + ct * dy
-
-        delta[:, t, 0] = dx_local
-        delta[:, t, 1] = dy_local
-        delta[:, t, 2] = torch.cos(dtheta)
-        delta[:, t, 3] = torch.sin(dtheta)
-
-    return delta
-"""
 def init_module(
     module_class: Type[nn.Module],
     module_name: str,
@@ -492,7 +442,6 @@ def run_forward_pass(
     vla,
     action_head,
     action_proj,
-    mbra,
     shead,
     pose_projector,
     batch,
@@ -508,7 +457,6 @@ def run_forward_pass(
         vla (OpenVLAForActionPrediction_MMN): Vision-language-action policy.
         action_head (nn.Module): Action head module.
         action_proj (nn.Module): Action head module.        
-        mbra: MBRA action reannotater
         shead: small head for OmniVLA++
         pose_projector (nn.Module): Proprioceptive state projector module.
         batch (dict): Input batch.
@@ -532,27 +480,12 @@ def run_forward_pass(
     ground_truth_actions = batch["actions"].to(device_id).to(torch.bfloat16)
     modality_id = batch["goal_mask_select"]
         
-    #MBRA action reannotation
+    #For Edge adapter
     img_cur = transform(batch["c_image"]).to(device_id).to(torch.bfloat16)
     img_past = transform(batch["p_image"]).to(device_id).to(torch.bfloat16)
-
-    img_goal = transform(batch["goal_image_8"])
-    img_hist = torch.split(batch["cur_image"], 3, dim=1)
-    img_hist_norm_list = [transform(obs_image) for obs_image in img_hist]
-    img_hist_norm = torch.concat(img_hist_norm_list, dim=1)      
-
-    rsize = 0.3*torch.ones(Bsize, 1, 1).to(device_id)
-    delay = torch.zeros(Bsize, 1, 1).to(device_id)
-    linear_vel_old = 0.5*torch.ones(Bsize, 6).float().to(device_id)
-    angular_vel_old = 0.0*torch.ones(Bsize, 6).float().to(device_id)
-    vel_past = torch.cat((linear_vel_old, angular_vel_old), axis=1).unsqueeze(2)          
-                
-    with torch.no_grad():
-        linear_vel, angular_vel, _ = mbra(img_hist_norm, img_goal, rsize, delay, vel_past)  
-    action_mbra = robot_pos_model(linear_vel, angular_vel)  
     
     # OmniVLA forward pass    
-    if TRAIN_MODE:
+    if TRAIN_BASE:
         with torch.autocast("cuda", dtype=torch.bfloat16):    
             output: CausalLMOutputWithPast = vla(
                 input_ids=batch["input_ids"].to(device_id),
@@ -592,11 +525,9 @@ def run_forward_pass(
     # Compute metrics for continuous action representations (L1 regression | diffusion)
     if True:
         # Get last layer hidden states
-        last_hidden_states = output.hidden_states[-1]  # (B, seq_len, D)
-        #print(last_hidden_states.size())        
+        last_hidden_states = output.hidden_states[-1]  # (B, seq_len, D)    
         # Get hidden states for text portion of prompt+response (after the vision patches)
-        text_hidden_states = last_hidden_states[:, num_patches:-1]
-        #print(text_hidden_states.size())                
+        text_hidden_states = last_hidden_states[:, num_patches:-1]              
         # Get hidden states for action portion of response
         batch_size = batch["input_ids"].shape[0]
         actions_hidden_states = (
@@ -604,52 +535,17 @@ def run_forward_pass(
             .reshape(batch_size, NUM_ACTIONS_CHUNK * ACTION_DIM, -1)
             .to(torch.bfloat16)
         )  # (B, act_chunk_len, D)
-        #print(text_hidden_states[current_action_mask | next_actions_mask].size())      
-        #print(actions_hidden_states.size())
 
         # Predict action
-        """
-        if TRAIN_MODE:
-            predicted_actions = action_head.module.predict_action(actions_hidden_states, modality_id.to(torch.bfloat16).to(device_id))
-            #print("predicted_actions A", predicted_actions.size())    
-            projected_actions = action_proj.module.predict_action(actions_hidden_states, modality_id.to(torch.bfloat16).to(device_id))
-            predicted_actions = shead(img_hist_norm_list[-1], projected_actions)
-            #print("predicted_actions B", predicted_actions.size())    
-        else:
-            with torch.no_grad():
-                predicted_actions = action_head.module.predict_action(actions_hidden_states, modality_id.to(torch.bfloat16).to(device_id))
-                #print("predicted_actions A", predicted_actions.size())    
-                projected_actions = action_proj.module.predict_action(actions_hidden_states, modality_id.to(torch.bfloat16).to(device_id))
-                predicted_actions = shead(img_hist_norm_list[-1], projected_actions)
-                #print("predicted_actions B", predicted_actions.size())    
-        """
         if TRAIN_HEAD:
             projected_actions = action_proj.module.predict_action(actions_hidden_states, modality_id.to(torch.bfloat16).to(device_id))
-            #predicted_actions = action_proj.module.predict_action(actions_hidden_states.detach(), modality_id.to(torch.bfloat16).to(device_id))
             predicted_dactions = shead(img_cur, img_past, projected_actions)
-            #predicted_actions = shead(img_hist_norm_list[-1].to(torch.bfloat16), projected_actions)
-            #predicted_actions = action_head.module.predict_action(actions_hidden_states, modality_id.to(torch.bfloat16).to(device_id))
         else:
             with torch.no_grad():
                 projected_actions = action_proj.module.predict_action(actions_hidden_states.detach(), modality_id.to(torch.bfloat16).to(device_id))
-                #predicted_actions = action_proj.module.predict_action(actions_hidden_states.detach(), modality_id.to(torch.bfloat16).to(device_id))
                 predicted_dactions = shead(img_cur, img_past, projected_actions)
-                #predicted_actions = shead(img_hist_norm_list[-1].to(torch.bfloat16), projected_actions)
-                #predicted_actions = action_head.module.predict_action(actions_hidden_states, modality_id.to(torch.bfloat16).to(device_id))
 
-        #action_orig = torch.zeros(Bsize, 1, 4)
-        #action_orig[:, :, 2] = torch.cos(torch.tensor(0.0))
-        #action_orig[:, :, 3] = torch.sin(torch.tensor(0.0))        
-        #sm_ref = torch.cat((action_orig.to(torch.bfloat16).to(device_id), predicted_actions[:,0:-1]), dim=1)
-
-        #print("predicted_actions", predicted_actions.size())
-        #print("projected actions", projected_actions.size())
-        # Setting supervised action command by raw action or systhetic MBRA action
-        mask_act = batch["action_select_mask"].to(torch.bfloat16).to(device_id).unsqueeze(1).unsqueeze(2).repeat(1,8,4)
-        mask_notact = -1.0*(mask_act - 1.0)           
-        action_ref = mask_act*ground_truth_actions + mask_notact*action_mbra.detach().to(torch.bfloat16)
-
-        limited_temp_dist = torch.clip(batch["temp_dist"], min=0.0, max=20.0) 
+        action_ref = ground_truth_actions
         lan_bool = (batch["goal_mask_select"] == 7)|(batch["goal_mask_select"] == 8) #object loss is only for the LeLaN dataset
 
         daction_ref = pose_to_delta(action_ref)
@@ -660,15 +556,11 @@ def run_forward_pass(
         action_orig[:, :, 3] = torch.sin(torch.tensor(0.0))        
         sm_ref = torch.cat((action_orig.to(torch.bfloat16).to(device_id), predicted_actions[:,0:-1]), dim=1)
 
-        #loss = 15.0*torch.nn.MSELoss()(daction_ref, predicted_dactions) + 0.1*torch.nn.MSELoss()(obj_pose_norm[lan_bool], predicted_actions[:,-1,0:2][lan_bool]) + 0.1*torch.nn.MSELoss()(predicted_actions[:,0:-1], predicted_actions[:,1:])            
-        #loss = 0.5*torch.nn.MSELoss()(action_ref[~lan_bool], predicted_actions[~lan_bool]) + 0.5*15.0*torch.nn.MSELoss()(daction_ref[~lan_bool], predicted_dactions[~lan_bool]) + 0.1*torch.nn.MSELoss()(obj_pose_norm[lan_bool], predicted_actions[:,-1,0:2][lan_bool]) + 0.1*torch.nn.MSELoss()(predicted_actions[:,0:-1], predicted_actions[:,1:])
         loss = 0.5*torch.nn.MSELoss()(action_ref[~lan_bool], predicted_actions[~lan_bool]) + 0.5*15.0*torch.nn.MSELoss()(daction_ref[~lan_bool], predicted_dactions[~lan_bool]) + 0.1*torch.nn.MSELoss()(obj_pose_norm[lan_bool], predicted_actions[:,-1,0:2][lan_bool]) + 0.1*torch.nn.MSELoss()(sm_ref, predicted_actions)
 
         L2_daction = torch.nn.MSELoss()(daction_ref[~lan_bool], predicted_dactions[~lan_bool])
         L2_action = torch.nn.MSELoss()(action_ref[~lan_bool], predicted_actions[~lan_bool])
-
         L2_obj = torch.nn.MSELoss()(obj_pose_norm[lan_bool], predicted_actions[:,-1,0:2][lan_bool])
-        #L2_smooth = torch.nn.MSELoss()(predicted_actions[:,0:-1], predicted_actions[:,1:])
         L2_smooth = torch.nn.MSELoss()(sm_ref, predicted_actions)
             
         loss_list = []
@@ -682,14 +574,10 @@ def run_forward_pass(
         metrics.update(
             {
                 "loss_value": loss.item(),            # Detached value for logging
-                "L2_action_value": L2_daction.item(),  # Detached value for logging                
+                "L2_daction_value": L2_daction.item(),# Detached value for logging     
+                "L2_action_value": L2_action.item(),                           
                 "L2_obj_value": L2_obj.item(),        # Detached value for logging
-                "L2_smooth_value": L2_smooth.item(),  # Detached value for logging                  
-                #"L2_sate": loss_list[0].item(),
-                "L2_sate": L2_action.item(),
-                "L2_sate_pose": loss_list[1].item(),
-                "L2_sate_img": loss_list[2].item(),  
-                "L2_sate_pose_img": loss_list[3].item(),                                                                           
+                "L2_smooth_value": L2_smooth.item(),  # Detached value for logging                                                                                         
                 "L2_pose": loss_list[4].item(),
                 "L2_pose_img": loss_list[5].item(),
                 "L2_img": loss_list[6].item(),  
@@ -704,10 +592,8 @@ def run_forward_pass(
                 batch["gimg_PIL"],              
                 obj_pose_norm.detach().cpu(),   
                 batch["goal_pose"].detach().cpu(),
-                ground_truth_actions.detach().cpu(),
-                action_mbra.detach().cpu(),    
+                ground_truth_actions.detach().cpu(), 
                 predicted_actions.detach().cpu(),   
-                action_ref.detach().cpu(),    
                 batch["goal_mask_select"], 
                 batch["lan_prompts"],         
                 "train",   
@@ -852,9 +738,7 @@ def visualize_train(
     goal_pos_lan: torch.Tensor, 
     goal_pos: torch.Tensor, 
     traj_raw: torch.Tensor,
-    traj_mbra: torch.Tensor,    
     est_traj: torch.Tensor,
-    select_traj: torch.Tensor,    
     goal_mask_select: torch.Tensor,
     lan_prompts: list,
     eval_type: str,    
@@ -897,18 +781,12 @@ def visualize_train(
         task_id = goal_mask_select[i].item()
             
         x_raw = traj_raw[i, :, 0].detach().cpu().to(torch.float32).numpy()
-        y_raw = traj_raw[i, :, 1].detach().cpu().to(torch.float32).numpy()
-        x_mbra = traj_mbra[i, :, 0].detach().cpu().to(torch.float32).numpy()
-        y_mbra = traj_mbra[i, :, 1].detach().cpu().to(torch.float32).numpy()          
+        y_raw = traj_raw[i, :, 1].detach().cpu().to(torch.float32).numpy()       
         x_est = est_traj[i, :, 0].detach().cpu().to(torch.float32).numpy()
         y_est = est_traj[i, :, 1].detach().cpu().to(torch.float32).numpy()          
-        x_select = select_traj[i, :, 0].detach().cpu().to(torch.float32).numpy()
-        y_select = select_traj[i, :, 1].detach().cpu().to(torch.float32).numpy()
 
-        ax_graph.plot(-y_select, x_select, marker = 'o', color='m', linewidth=4, markersize=10, label="select") 
         ax_graph.plot(-np.insert(y_est, 0, 0.0), np.insert(x_est, 0, 0.0), linewidth=4.0, markersize=12, marker='o', color='blue', label="est")                                                      
-        ax_graph.plot(-y_raw, x_raw, marker = 'o', color='red', label="raw")
-        ax_graph.plot(-y_mbra, x_mbra, marker = 'o', color='green', label="mbra")                                                
+        ax_graph.plot(-y_raw, x_raw, marker = 'o', color='red', label="raw")                                             
         ax_graph.plot(-ygt, xgt, marker = '*', color='red')   
         ax_graph.text(2.5, -0.2, str(task_id))
 
@@ -939,10 +817,6 @@ def visualize_train(
         plt.close(fig)
 
 def merge_batches_padding(batch_list, pad_token_id, IGNORE_INDEX, model_max_length):
-    """
-    Merge a list of dictionary batches into a single dictionary,
-    concatenating tensor values along the batch dimension (dim=0).
-    """
     merged = {}
     keys = batch_list[0].keys()
     for key in keys:
@@ -969,20 +843,9 @@ def merge_batches_padding(batch_list, pad_token_id, IGNORE_INDEX, model_max_leng
     return merged
 
 @draccus.wrap()
-def train_omnivla(cfg: OmniVLAConfig) -> None:
+def train_asyncvla(cfg: OmniVLAConfig) -> None:
     """
-    Training OmniVLA on demonstration dataset via LoRA.
-
-    Allows toggling different action representations (discrete vs. continuous), different learning objectives
-    (next-token prediction vs. L1 regression vs. diffusion), FiLM. Also allows for additional model inputs,
-    such as additional camera images and robot proprioceptive state. Assumes parallel action generation with
-    action chunking.
-
-    Args:
-        cfg (OmniVLAConfig): Training configuration.
-
-    Returns:
-        None.
+    Training AsyncVLA on demonstration dataset via LoRA.
     """
     assert cfg.use_lora, "Only LoRA fine-tuning is supported. Please set --use_lora=True!"
 
@@ -992,61 +855,10 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     if cfg.vla_path == "openvla/openvla-7b": #from OpenVLA checkpoints
         cfg.resume = False
         cfg.resume_step = None
-    elif cfg.vla_path == "./omnivla-original": #from OmniVLA checkpoints (paper version)
+    elif cfg.vla_path == "./AsyncVLA_release": #from AsyncVLA checkpoints
         cfg.resume = True     
-        cfg.resume_step = 120000 
-    elif cfg.vla_path == "./omnivla-original-balance": #from OmniVLA checkpoints (fix LeLaN data unbalance)
-        cfg.resume = True     
-        cfg.resume_step = 285000
-    elif cfg.vla_path == "./omnivla-original-balance-delta2": #from OmniVLA checkpoints (fix LeLaN data unbalance)
-        cfg.resume = True
-        cfg.resume_step = 310000
-    elif cfg.vla_path == "./omnivla-original-balance-delta2_": #from OmniVLA checkpoints (fix LeLaN data unbalance)
-        cfg.resume = True
-        cfg.resume_step = 395000
-    elif cfg.vla_path == "./omnivla-original-balance-delta2-fix": #from OmniVLA checkpoints (fix LeLaN data unbalance)
-        cfg.resume = True
-        cfg.resume_step = 340000
-    elif cfg.vla_path == "./omnivla-original-balance-delta2-fix2": #from OmniVLA checkpoints (fix LeLaN data unbalance)
-        cfg.resume = True
-        cfg.resume_step = 350000
-    elif cfg.vla_path == "./omnivla-original-balance-shead": #from OmniVLA checkpoints (fix LeLaN data unbalance) + learned shead
-        cfg.resume = True     
-        cfg.resume_step = 295000
-    elif cfg.vla_path == "./omnivla-original-balance-delta2-fix-pretrain": #from OmniVLA checkpoints (fix LeLaN data unbalance)
-        cfg.resume = True
-        cfg.resume_step = 290000
-    elif cfg.vla_path == "./omnivla-original-balance-rand-all": #from OmniVLA checkpoints (fix LeLaN data unbalance) + learned shead
-        cfg.resume = True     
-        cfg.resume_step = 320000
-    elif cfg.vla_path == "./omnivla-original-balance-rand-all-second": #from OmniVLA checkpoints (fix LeLaN data unbalance) + learned shead
-        cfg.resume = True     
-        cfg.resume_step = 330000
-    elif cfg.vla_path == "./omnivla-finetuned-cast": #from OmniVLA checkpoints fituned with CAST dataset 
-        cfg.resume = True      
-        cfg.resume_step = 210000 
-    elif cfg.vla_path == "./omnivla-original-balance-delta2-fixfix": #from OmniVLA checkpoints (fix LeLaN data unbalance)
-        cfg.resume = True
-        cfg.resume_step = 305000
-    elif cfg.vla_path == "./omnivla-original-balance-delta3-gnm-full": #from OmniVLA checkpoints (fix LeLaN data unbalance) + learned shead
-        cfg.resume = True     
-        cfg.resume_step = 455000
-    elif cfg.vla_path == "./omnivla-original-balance-delta3-gnm-full2": #from OmniVLA checkpoints (fix LeLaN data unbalance) + learned shead
-        cfg.resume = True     
-        cfg.resume_step = 495000
-    elif cfg.vla_path == "./omnivla-original-balance-delta3-gnm-full3": #from OmniVLA checkpoints (fix LeLaN data unbalance) + learned shead
-        cfg.resume = True     
-        cfg.resume_step = 525000
-    elif cfg.vla_path == "./omnivla-original-balance-delta3-gnm-full4": #from OmniVLA checkpoints (fix LeLaN data unbalance) + learned shead
-        cfg.resume = True     
-        cfg.resume_step = 580000
-    elif cfg.vla_path == "./omnivla-original-balance-noid": #from OmniVLA checkpoints (fix LeLaN data unbalance) + learned shead
-        cfg.resume = True     
-        cfg.resume_step = 355000
-    elif cfg.vla_path == "./omnivla-original-balance-noid-ft": #from OmniVLA checkpoints (fix LeLaN data unbalance) + learned shead
-        cfg.resume = True     
-        cfg.resume_step = 535000
-                          
+        cfg.resume_step = 750000
+                                  
     # Get experiment run ID
     run_id = get_run_id(cfg)
 
@@ -1067,31 +879,12 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     if distributed_state.is_main_process:
         wandb.init(entity=cfg.wandb_entity, project=cfg.wandb_project, name=f"ft+{run_id}")
     
-    #defining and loading MBRA
-    with open("./config_nav/mbra_and_dataset_config_bellman_sacson.yaml", "r") as f:        
-    #with open("./config_nav/mbra_and_dataset_config__.yaml", "r") as f:        
+    #defining and loading MBRA 
+    with open("./config_nav/dataset_config.yaml", "r") as f:        
         config = yaml.safe_load(f)      
-    mbra = ExAug_dist_delay(
-        context_size=config["context_size"],
-        len_traj_pred=config["len_traj_pred"],
-        learn_angle=config["learn_angle"],
-        obs_encoder=config["obs_encoder"],
-        obs_encoding_size=config["obs_encoding_size"],
-        late_fusion=config["late_fusion"],
-        mha_num_attention_heads=config["mha_num_attention_heads"],
-        mha_num_attention_layers=config["mha_num_attention_layers"],
-        mha_ff_dim_factor=config["mha_ff_dim_factor"],
-    )
-    checkpoint_path_mbra = os.path.join("./MBRA", "mbra.pth")
-    print("Loading MBRA model from ", checkpoint_path_mbra)
-    latest_checkpoint_mbra = torch.load(checkpoint_path_mbra, map_location="cpu")
-    mbra.load_state_dict(latest_checkpoint_mbra, strict=False)
-    mbra.eval().to(device=device_id)
-    mbra = wrap_ddp(mbra, device_id, find_unused=True)
 
     #defining small head
-    #shead = Small_head_idcat(
-    shead = Small_head_img_pd2_noid(
+    shead = Edge_adapter(
         obs_encoding_size=config["obs_encoding_size"],
         mha_num_attention_heads=config["mha_num_attention_heads"],
         mha_num_attention_layers=config["mha_num_attention_layers"],
@@ -1110,7 +903,6 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
         missing, unexpected = shead.load_state_dict(state_dict, strict=False)
         print("Missing keys:", missing)
         print("Unexpected keys:", unexpected)
-        #shead.load_state_dict(latest_checkpoint_shead, strict=False) 
     
     shead.to(torch.bfloat16).to(device=device_id)
     shead = wrap_ddp(shead, device_id, find_unused=True)
@@ -1221,7 +1013,6 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
         {"llm_dim": vla.module.llm_dim, "proprio_dim": POSE_DIM},
     )
 
-    # If applicable, instantiate continuous action head for L1 regression
     action_head = init_module(
         L1RegressionActionHead_idcat,
         "action_head",
@@ -1231,14 +1022,12 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
         to_bf16=True,
     )
 
-    # If applicable, instantiate continuous action head for L1 regression
     action_proj = init_module(
         Proj_Actiontokens,
         "action_proj",
         cfg,
         device_id,
         {"input_dim": vla.module.llm_dim, "hidden_dim": vla.module.llm_dim, "action_dim": 1024},
-        #{"input_dim": vla.module.llm_dim, "hidden_dim": vla.module.llm_dim, "action_dim": ACTION_DIM},
         to_bf16=True,
     )
 
@@ -1247,11 +1036,11 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     # For goal pose conditioning
     NUM_PATCHES += 1
 
-    if not TRAIN_MODE:
+    if not TRAIN_BASE:
         for param in vla.parameters():
             param.requires_grad = False
        
-    if TRAIN_MODE:
+    if TRAIN_BASE:
         trainable_params = [param for param in vla.parameters() if param.requires_grad]
         trainable_params += [param for param in action_head.parameters() if param.requires_grad]
         trainable_params += [param for param in action_proj.parameters() if param.requires_grad]    
@@ -1285,18 +1074,8 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
         tokenizer_max_length, processor.tokenizer.pad_token_id, padding_side="right", num_img = cfg.num_images_in_input
         
     )
-
-    #Batch size (You can edit according to your GPU resources.)
-    #Bcast, Bfrod, Bgnm, Bbdd, Blan = cfg.batch_size, cfg.batch_size, cfg.batch_size, cfg.batch_size, 2
-    #Bcast, Bfrod, Bgnm, Bbdd, Blan = 10, 10, 10, 10, 40
-    #Bcast, Bfrod, Bgnm, Bbdd, Blan = 10, 10, 10, 10, 40
-    #Bcast, Bfrod, Bgnm, Bbdd, Blan = 1, 1, 1, 1, 1
-    #Bcast, Bfrod, Bgnm, Bbdd, Blan = 3, 3, 3, 3, 10
-    #Bcast, Bfrod, Bgnm, Bbdd, Blan = 3, 3, 10, 3, 3
-    #Bcast, Bfrod, Bgnm, Bbdd, Blan = 3, 3, 9, 3, 9
-
-    #Bcast, Bfrod, Bgnm, Bbdd, Blan = 3, 3, 40, 3, 40
-    Bcast, Bfrod, Bgnm, Bbdd, Blan, Bsacson = 3, 3, 30, 3, 30, 20
+    Bgnm, Blan, Bsacson = 1, 1, 1    
+    #Bgnm, Blan, Bsacson = 30, 30, 30
 
     train_dataset_dummy = []
     test_dataset_dummy = []        
@@ -1320,7 +1099,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                 
             train_loader_dummy = DataLoader(
                 train_dataset_dummy,
-                batch_size=cfg.batch_size,
+                batch_size=1,
                 shuffle=False,
                 collate_fn=collator,
                 num_workers=8,
@@ -1342,87 +1121,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                 persistent_workers=True,
                 sampler=sampler_train_dummy,
             )           
-        """ 
-        #CAST dataset 
-        if data_split_type == "train":
-            cast_loc = config["datasets_CAST"]["path"]
-            print("CAST dataset from ", cast_loc)
-            with open(cast_loc + "features.pkl", 'rb') as f:
-                features, num_examples = pickle.load(f)
-                                    
-            #CAST_dataset_list = ["cast_filtered_dataset_convert", "cast_counterfactual_dataset_convert", "atomic_turn_right_dataset_convert", "atomic_turn_left_dataset_convert", "atomic_stop_dataset_convert", "atomic_forward_dataset_convert", "atomic_adjust_right_dataset_convert", "atomic_adjust_left_dataset_convert"]
-            #CAST_size = [15493, 103125, 27486, 28336, 1293, 94656, 5872, 6706]
-            #ratios = [0.4, 0.4, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1] #weighting is same as the original CAST setup
-            #CAST_dataset_list = ["cast_filtered_dataset_convert"]
-            #CAST_size = [15493]
-            #ratios = [0.4] #weighting is same as the original CAST setup
-            CAST_dataset_list = ["cast_counterfactual_dataset_convert"]
-            CAST_size = [103125]
-            ratios = [0.4] #weighting is same as the original CAST setup            
-            
-            weights = []
-            for size, ratio in zip(CAST_size, ratios):
-                weights.extend([ratio / size] * size)
-            weights = torch.DoubleTensor(weights)
-                
-            train_dataset_CAST_l = []
-            for idx, dataset_name in enumerate(CAST_dataset_list):    
-                train_dataset_CAST_comp = CAST_Dataset(action_tokenizer=action_tokenizer,
-                    base_tokenizer=processor.tokenizer, 
-                    image_transform=processor.image_processor.apply_transform,
-                    prompt_builder_fn=PurePromptBuilder,
-                    dataset_name=dataset_name,
-                    data_loc=cast_loc,
-                    data_size=CAST_size[idx],
-                    features=features)
-                train_dataset_CAST_l.append(train_dataset_CAST_comp)
-                
-            train_dataset_CAST = ConcatDataset(train_dataset_CAST_l)
-                
-            sampler_train_cast = DistributedWeightedSampler(
-                weights, num_samples=len(train_dataset_CAST), replacement=True
-            )
- 
-            train_loader_CAST = DataLoader(
-                train_dataset_CAST,
-                batch_size=Bcast,
-                shuffle=False,            
-                num_workers=config["num_workers"],
-                collate_fn=collator,
-                drop_last=True,
-                persistent_workers=True,
-                sampler=sampler_train_cast)           
-        """
-        """
-        #Frodobots-2k dataset 
-        split_train_test = int(11994*0.9)             
-        if data_split_type == "train":
-            dataset_Frodobots = Frodobots_Dataset_rand(
-            #dataset_Frodobots = Frodobots_Dataset(
-                action_tokenizer=action_tokenizer,
-                base_tokenizer=processor.tokenizer, 
-                image_transform=processor.image_processor.apply_transform,
-                prompt_builder_fn=PurePromptBuilder,                 
-                video="video", 
-                root=config["datasets_frodobots"]["root"], 
-                image_size=config["image_size"], 
-                split="train", 
-                goal_horizon=config["datasets_frodobots"]["horizon_short"], 
-                goal_horizon2=config["datasets_frodobots"]["horizon_long"], 
-                context_spacing=3, 
-                action_spacing=3)         
-            sampler_train_frodobots = EpisodeSampler_Frodobots(dataset_Frodobots, 0, split_train_test, goal_horizon=config["datasets_frodobots"]["horizon_short"], data_split_type=data_split_type, num_replicas=world_size, rank=device_id)  
-            train_loader_frodobots = DataLoader(
-                dataset_Frodobots,
-                batch_size=Bfrod,
-                shuffle=False,            
-                num_workers=config["num_workers"],
-                collate_fn=collator,
-                drop_last=True,
-                persistent_workers=True,
-                sampler=sampler_train_frodobots,
-            )                                
-        """
+
         #GNM dataset   
         train_dataset_gnm = []
         test_dataset_gnm = [] 
@@ -1441,7 +1140,6 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                 data_config_sub["waypoint_spacing"] = 1
             if data_split_type in data_config_sub:
                 dataset_gnm = GNM_Dataset_rand(
-                #dataset_gnm = GNM_Dataset(
                     action_tokenizer=action_tokenizer,
                     base_tokenizer=processor.tokenizer,
                     image_transform=processor.image_processor.apply_transform,
@@ -1480,49 +1178,13 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                 persistent_workers=True,
                 sampler=sampler_train_gnm,
             )                  
-        """
-        #BDD dataset     
-        data_config_bdd = config["datasets_bdd"]
-        dataset_bdd = BDD_Dataset_rand(
-        #dataset_bdd = BDD_Dataset(
-            action_tokenizer=action_tokenizer,
-            base_tokenizer=processor.tokenizer, 
-            image_transform=processor.image_processor.apply_transform,
-            prompt_builder_fn=PurePromptBuilder,              
-            data_split_folder=data_config_bdd[data_split_type],
-            dataset_name="bdd",
-            image_size=config["image_size"],
-            waypoint_spacing=data_config_bdd["waypoint_spacing"],
-            len_traj_pred=config["len_traj_pred"],
-            learn_angle=config["learn_angle"],
-            context_size=config["context_size"],
-            data_split_type = data_split_type,
-            data_folder = data_config_bdd["image"],    
-            pickle_folder = data_config_bdd["pickle"],                                                                        
-            context_type=config["context_type"],
-            normalize=config["normalize"],
-            aug_seq=data_config_bdd["aug_seq"],                                                     
-        )   
-        if data_split_type == "train":
-            sampler_train_bdd = DistributedSampler(dataset_bdd, num_replicas=world_size, rank=device_id, shuffle=True)  
-            train_loader_bdd = DataLoader(
-                dataset_bdd,
-                batch_size=Bbdd,
-                shuffle=False,
-                num_workers=config["num_workers"],
-                collate_fn=collator,
-                drop_last=True,
-                persistent_workers=True,
-                sampler=sampler_train_bdd,
-            )      
-        """
+
         #LeLaN dataset
         train_dataset_lan = []
         test_dataset_lan = []                         
         for dataset_name_lan in config["datasets_lelan"]:
             data_config_lan = config["datasets_lelan"][dataset_name_lan]   
             dataset_lelan = LeLaN_Dataset_rand(
-            #dataset_lelan = LeLaN_Dataset(
                 action_tokenizer=action_tokenizer,
                 base_tokenizer=processor.tokenizer, 
                 image_transform=processor.image_processor.apply_transform,
@@ -1616,49 +1278,26 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     # Deque to store recent train metrics (used for computing smoothened metrics for gradient accumulation)
     recent_metrics = {
         "loss_value": deque(maxlen=cfg.grad_accumulation_steps),
-        "L2_action_value": deque(maxlen=cfg.grad_accumulation_steps),        
+        "L2_action_value": deque(maxlen=cfg.grad_accumulation_steps),   
+        "L2_daction_value": deque(maxlen=cfg.grad_accumulation_steps),             
         "L2_obj_value": deque(maxlen=cfg.grad_accumulation_steps),
         "L2_smooth_value": deque(maxlen=cfg.grad_accumulation_steps),             
-        "L2_sate": deque(maxlen=cfg.grad_accumulation_steps),
-        "L2_sate_pose": deque(maxlen=cfg.grad_accumulation_steps),        
-        "L2_sate_img": deque(maxlen=cfg.grad_accumulation_steps),
-        "L2_sate_pose_img": deque(maxlen=cfg.grad_accumulation_steps),   
         "L2_pose": deque(maxlen=cfg.grad_accumulation_steps),        
         "L2_pose_img": deque(maxlen=cfg.grad_accumulation_steps),
         "L2_img": deque(maxlen=cfg.grad_accumulation_steps),       
         "L2_lan": deque(maxlen=cfg.grad_accumulation_steps),          
         "L2_lan_pose": deque(maxlen=cfg.grad_accumulation_steps),                                            
-    }
-
-    #You can list your all training datasets. In this example, we list same two dummy data loaders.    
-    #iters = [iter(train_loader_lelan), iter(train_loader_lelan)]
-    #samplers = [sampler_train_lelan, sampler_train_lelan]       
-    #iters = [iter(train_loader_CAST), iter(train_loader_lelan)]
-    #samplers = [sampler_train_cast, sampler_train_lelan]     
-    #iters = [iter(train_loader_gnm), iter(train_loader_lelan)]
-    #samplers = [sampler_train_gnm, sampler_train_lelan]       
-
+    }    
     iters = [iter(train_loader_gnm), iter(train_loader_lelan), iter(train_loader_sacson)]
-    samplers = [sampler_train_gnm, sampler_train_lelan, sampler_train_sacson]   
-
-    #iters = [iter(train_loader_lelan), iter(train_loader_lelan)]
-    #samplers = [sampler_train_lelan, sampler_train_lelan]      
-    #iters = [iter(train_loader_dummy), iter(train_loader_dummy)]
-    #samplers = [sampler_train_dummy, sampler_train_dummy]    
-    #iters = [iter(train_loader_lelan), iter(train_loader_frodobots), iter(train_loader_gnm), iter(train_loader_bdd)]
-    #samplers = [sampler_train_lelan, sampler_train_frodobots, sampler_train_gnm, sampler_train_bdd]  
-    #iters = [iter(train_loader_frodobots), iter(train_loader_gnm), iter(train_loader_bdd)]
-    #samplers = [sampler_train_frodobots, sampler_train_gnm, sampler_train_bdd]                     
-    #iters = [iter(train_loader_gnm), iter(train_loader_lelan), iter(train_loader_frodobots), iter(train_loader_bdd), iter(train_loader_CAST)]
-    #samplers = [sampler_train_gnm, sampler_train_lelan, sampler_train_frodobots, sampler_train_bdd, sampler_train_cast]          
-                                 
+    samplers = [sampler_train_gnm, sampler_train_lelan, sampler_train_sacson]          
+                                                                  
     log_count = 0
     for epoch in range(100):
         for sampler in samplers:
             sampler.set_epoch(epoch)
                 
         with tqdm.tqdm(total=cfg.max_steps, leave=False) as progress:
-            if TRAIN_MODE:
+            if TRAIN_BASE:
                 print("setting up training mode")
                 vla.train()
                 if TRAIN_HEAD:
@@ -1687,12 +1326,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                     try:
                         batch = next(it)
                     except StopIteration:
-                        #iters[i] = iter([train_loader_lelan, train_loader_lelan][i])
-                        #iters[i] = iter([train_loader_frodobots, train_loader_gnm, train_loader_bdd][i])                        
-                        #iters[i] = iter([train_loader_gnm, train_loader_lelan][i])
                         iters[i] = iter([train_loader_gnm, train_loader_lelan, train_loader_sacson][i])
-
-                        #iters[i] = iter([train_loader_lelan, train_loader_frodobots, train_loader_gnm, train_loader_bdd][i])
                         batch = next(iters[i])
                     batches.append(batch)
                 
@@ -1704,7 +1338,6 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                     vla=vla,
                     action_head=action_head,
                     action_proj=action_proj,
-                    mbra=mbra,
                     shead=shead,
                     pose_projector=pose_projector,
                     batch=merged_batch,
@@ -1717,7 +1350,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                 normalized_loss = loss / cfg.grad_accumulation_steps
                         
                 # Backward pass
-                if TRAIN_MODE:
+                if TRAIN_BASE:
                     normalized_loss.backward()
                 elif TRAIN_HEAD:
                     normalized_loss.backward()
@@ -1778,4 +1411,4 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                     )
 
 if __name__ == "__main__":
-    train_omnivla()
+    train_asyncvla()

@@ -9,9 +9,7 @@ prismatic/vla/datasets/cast_dataset_.py
 prismatic/vla/datasets/lelan_dataset_.py
 prismatic/vla/datasets/gnm_dataset_.py
 prismatic/vla/datasets/frodobots_dataset_.py
-vla-scripts/train_omnivla_dataset_.py
-vla-scripts/train_omnivla_dataset__.py
-vla-scripts/finetune_nav_MMN_dataset_cast2.py
+vla-scripts/train_asyncvla_.py
 config_nav/mbra_and_dataset_config_.yaml
 visualization/
 runs/
@@ -19,3 +17,5 @@ runs/
 **/__pycache__/
 # Ignore all wandb directories everywhere
 **/wandb/
+AsyncVLA_release/
+AsyncVLA_v0/

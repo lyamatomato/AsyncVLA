@@ -10,11 +10,11 @@ authors = [
     {name = "Dhruv Shah"},
     {name = "Sergey Levine"},    
 ]
-description = "OmniVLA: An Omni-Modal Vision-Language-Action Model for Robot Navigation"
+description = "AsyncVLA: An Asynchronous VLA for Fast and Robust Navigation on the Edge"
 version = "0.0.1"
 readme = "README.md"
 requires-python = ">=3.8"
-keywords = ["vision-language-action model", "vision-based navigation", "robot learning"]
+keywords = ["vision-language-action model", "vision-based navigation", "robot learning", "foundation model"]
 license = {file = "LICENSE"}
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -80,8 +80,8 @@ sagemaker = [
 ]
 
 [project.urls]
-homepage = "https://omnivla-nav.github.io"
-repository = "https://github.com/NHirose/OmniVLA"
+homepage = "https://asyncvla.github.io"
+repository = "https://github.com/NHirose/AsyncVLA"
 
 [tool.setuptools.packages.find]
 where = ["."]

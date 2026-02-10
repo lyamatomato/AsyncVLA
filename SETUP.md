@@ -4,16 +4,16 @@
 
 ```bash
 # Create and activate conda environment
-conda create -n omnivla python=3.10 -y
-conda activate omnivla
+conda create -n asyncvla python=3.10 -y
+conda activate asyncvla
 
 # Install PyTorch
 # Use a command specific to your machine: https://pytorch.org/get-started/locally/
 pip3 install numpy==1.26.4 torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0
 
 # Clone openvla-oft repo and pip install to download dependencies
-git clone https://github.com/NHirose/OmniVLA.git
-cd OmniVLA
+git clone https://github.com/NHirose/AsyncVLA.git
+cd AsyncVLA
 pip install -e .
 
 # Install Flash Attention 2 for training (https://github.com/Dao-AILab/flash-attention)

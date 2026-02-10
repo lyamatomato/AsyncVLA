@@ -16,6 +16,7 @@ import math
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
+from torchvision.transforms.functional import to_tensor
 
 import random
 #import cv2
@@ -183,11 +184,15 @@ class Dummy_Dataset(Dataset):
             actions=torch.as_tensor(actions),       #action commands
             action_select_mask = action_select_mask,#action select mask, 1.0: raw action, 0.0: MBRA synthetic action
             goal_pose=goal_pose_cos_sin,            #goal pose [X, Y, cos(yaw), sin(yaw)]
+            delay_pose=goal_pose_cos_sin,
             obj_pose_norm=goal_pose_cos_sin[0:2],   #obj pose [X, Y] (This is only for LeLaN dataset) : Dummy pose in this dummy dataset      
             img_PIL=current_image_PIL,              #for visualization
-            gimg_PIL=goal_image_PIL,                #for visualization       
+            gimg_PIL=goal_image_PIL,                #for visualization   
+            p_image=TF.resize(to_tensor(current_image_PIL), (96, 96)),    
+            c_image=TF.resize(to_tensor(current_image_PIL), (96, 96)),                      
             cur_image=image_obs,                    #History of image for MBRA
             goal_image_8=image_goal,                #Goal image (8 step future) for MBRA
             temp_dist=10.0,                         #Temporal distance (We are not using in our training)
+            lan_prompt="No language instruction"
         )      
 
