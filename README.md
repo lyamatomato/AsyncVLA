@@ -34,11 +34,6 @@ We provide training code that supports multiple public datasets. Before followin
     git clone https://github.com/huggingface/lerobot.git 
     ```
 3. Edit the data path in config_nav/dataset_config.yaml:
-
-5. Training our policy from OpenVLA checkpoints (Please fill X):
-    ```
-    torchrun --standalone --nnodes 1 --nproc-per-node X vla-scripts/train_omnivla_dataset.py  --vla_path ./omnivla-original --dataset_name omnivla --wandb_entity "X"   --wandb_project "omnivla"
-    ```
        
 In our training setup, we use 5 Nvidia H200 GPUs (140 GB each) across 5 nodes. The batch sizes are configured as [LeLaN, GNM, SACSoN] = [6, 6, 6], with gradient accumulation set to 2 steps. 
 
@@ -55,7 +50,7 @@ We provide the training code along with a sample dataloader to help you quickly 
     
 4. Training our policy from AsyncVLA checkpoints (Please fill X):
     ```
-    torchrun --standalone --nnodes 1 --nproc-per-node X vla-scripts/train_asyncvla.py  --vla_path ./AsyncVLA_release --dataset_name omnivla --wandb_entity "X"   --wandb_project "asyncvla" --grad_accumulation_steps X
+    torchrun --standalone --nnodes 1 --nproc-per-node X vla-scripts/train_asyncvla.py  --vla_path ./AsyncVLA_release --dataset_name asyncvla --wandb_entity "X"   --wandb_project "asyncvla" --grad_accumulation_steps X
     ```
     
 ### Acknowledgement
