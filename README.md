@@ -1,4 +1,4 @@
-# OmniVLA: An Omni-Modal Vision-Language-Action Model for Robot Navigation
+# AsyncVLA: An Asynchronous VLA for Fast and Robust Navigation on the Edge
 [![Python](https://img.shields.io/badge/python-3.10-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Static Badge](https://img.shields.io/badge/Project-Page-a)](https://asyncvla.github.io)
