@@ -16,13 +16,11 @@ Please set up a conda environment (see instructions in [SETUP.md](SETUP.md)).
     ```
     git clone https://huggingface.co/NHirose/AsyncVLA_release
     ```
-2. Run AsyncVLA using a sample current image, GPS pose, and language prompt. You can view the generated trajectory in the output figure 1_ex.jpg. (Run BaseVLA and Edge adapter in same PC)
+2. Run AsyncVLA using sample current images and 2D goal pose. You can view the generated trajectories in the output figure visualization_asyncvla.jpg. (Run BaseVLA and Edge adapter in same PC)
     ```
     python inference/run_asyncvla.py
-    ```
-3. Change the goal modality: by default, our code generates actions based on the language prompt. To use a different modality, you can modify the settings around line 560. 
-    
-4. Run AsyncVLA to control the real robot. We split the AsyncVLA into the base VLA and the edge adapter. Then we run the base VLA in the remote workstation and run the edge adapter in the robot edge controller with ROS1. Details are shown in the paper appendix. 
+    ```   
+3. Run AsyncVLA to control the real robot. We split the AsyncVLA into the base VLA and the edge adapter. Then we run the base VLA in the remote workstation and run the edge adapter in the robot edge controller with ROS1. Details are shown in the paper appendix. 
 
 ### Datasets
 We provide training code that supports multiple public datasets. Before following the full training process, please first ensure that you can run the example training with the sample dataloader.

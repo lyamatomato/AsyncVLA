@@ -127,23 +127,15 @@ class SACSoN_Dataset_rand(Dataset):
             odom_path = []   
             ped_flag = [] 
             ped_list = [] 
-                                   
-            #print(self.data_pickle_folder)                         
+                                                      
             folder_lst = next(os.walk(self.data_pickle_folder))[1]
-            """
-            if self.data_split_type == "train":
-                folder_lst_dataset = folder_lst[0:len(folder_lst)-1]
-            else:
-                folder_lst_dataset = folder_lst[len(folder_lst)-1:len(folder_lst)]
-            """
             folder_lst_dataset = folder_lst                 
             for folder in folder_lst_dataset:
                 subfolder_lst = os.listdir(self.data_pickle_folder + folder + "/")                                    
                 for subfolder in subfolder_lst:
                     #print(self.data_image_folder + folder + "/" + subfolder + "/" + subfolder + "_" + folder + "_fisheye.txt")
                     with open(self.data_image_folder + folder + "/" + subfolder + "/" + subfolder + "_" + folder + "_fisheye.txt", "r") as f:
-                        fisheye = f.read().splitlines() #.replace("fisheye", "fisheye_small")
-                        #fisheye = f.read().splitlines()                               
+                        fisheye = f.read().splitlines() #.replace("fisheye", "fisheye_small")                            
                     with open(self.data_image_folder + folder + "/" + subfolder + "/" + subfolder + "_" + folder + "_odom.txt", "r") as f:
                         odom = f.read().splitlines()   
                     with open(self.data_image_folder + folder + "/" + subfolder + "/" + subfolder + "_" + folder + "_pedlist_update.txt", "r") as f:
@@ -157,27 +149,7 @@ class SACSoN_Dataset_rand(Dataset):
         self.image_path = image_path
         self.odom_path = odom_path
         self.ped_flag = ped_flag
-        #print(len(self.image_path), len(self.odom_path), len(self.ped_flag), self.image_path[0], self.image_path[-1])
-        """
-        iv = 100
-        dfps = 4
-        goal_odoms_txt = [self.odom_path[min(iv + 40 - 5, len(self.image_path)-1)].split()]
 
-        odoms_txt = [self.odom_path[iv + dfps*i].split() for i in range(9)] + goal_odoms_txt
-        print("odoms_txt", odoms_txt)             
-        odoms_xy = [[float(odom_list[0]), float(odom_list[1])] for odom_list in odoms_txt]
-        odoms_yaw = [float(odom_list[5]) for odom_list in odoms_txt]            
-        print("odoms_xy", odoms_xy) 
-        print("odoms_yaw", odoms_yaw)                     
-        waypoints = to_local_coords(np.array(odoms_xy[1:]), np.array(odoms_xy[0]), np.array(odoms_yaw[0]))
-        print("waypoints", waypoints)    
-        actions_all = [[waypoints[i].tolist()[0]/self.data_config["metric_waypoint_spacing"] * self.waypoint_spacing, waypoints[i].tolist()[1]/self.data_config["metric_waypoint_spacing"] * self.waypoint_spacing, np.cos(odoms_yaw[i+1] - odoms_yaw[0]), np.sin(odoms_yaw[i+1] - odoms_yaw[0])] for i in range(9)]
-            
-        actions = actions_all[0:8]
-        goal_pose_cos_sin = actions_all[8]
-        print("actions", actions)                                     
-        print("goal_pose_cos_sin", goal_pose_cos_sin)                            
-        """
     def _get_augdata(self):
         self.aug_data_list = []
         for path in self.pickle_path:
@@ -270,8 +242,7 @@ class SACSoN_Dataset_rand(Dataset):
             ped_flag_2 = float(self.ped_flag[iv-lt].split()[0])
             ped_dist_2 = float(self.ped_flag[iv-lt].split()[1])
                                     
-            #if (ped_flag_1 > 0.5 or ped_flag_2 > 0.5) and (ped_dist_1 < 4.0 or ped_dist_1 < 4.0):            
-            if True:
+            if (ped_flag_1 > 0.5 or ped_flag_2 > 0.5) and (ped_dist_1 < 4.0 or ped_dist_1 < 4.0):            
                 flag_data = 1
             else:
                 iv = random.randint(0, len(self.image_path)-50-1)
@@ -296,7 +267,6 @@ class SACSoN_Dataset_rand(Dataset):
             except:
                 goal_image_full_8 = self._load_image_front(self.data_image_folder + self.image_path[iv])  
     
-            #print(goal_id, iv+goal_id, len(self.image_path)-1, min(iv + goal_id - lt, len(self.image_path)-1), len(self.image_path), len(self.odom_path))
             try:
                 gimage_fullsize_PIL = self._load_image_front_PIL(self.data_image_folder + self.image_path[int(min(iv + goal_id - lt, len(self.image_path)-1))])  
                 goal_odoms_txt = [self.odom_path[int(min(iv + goal_id - lt, len(self.image_path)-1))].split()]            
@@ -309,36 +279,21 @@ class SACSoN_Dataset_rand(Dataset):
             distance = int(goal_id/dfps)
                                      
             odoms_txt = [self.odom_path[iv + int(dfps*i)].split() for i in range(9)] + goal_odoms_txt
-            odoms_lt_txt = [self.odom_path[iv -lt + int(dfps*i)].split() for i in range(9)] + goal_odoms_txt            
-            #print("odoms_txt", odoms_txt)             
+            odoms_lt_txt = [self.odom_path[iv -lt + int(dfps*i)].split() for i in range(9)] + goal_odoms_txt                    
             odoms_xy = [[float(odom_list[0]), float(odom_list[1])] for odom_list in odoms_txt]
             odoms_yaw = [float(odom_list[5]) for odom_list in odoms_txt]    
             odoms_lt_xy = [[float(odom_lt_list[0]), float(odom_lt_list[1])] for odom_lt_list in odoms_lt_txt]
-            odoms_lt_yaw = [float(odom_lt_list[5]) for odom_lt_list in odoms_lt_txt]                     
-            #print("odoms_xy", odoms_xy) 
-            #print("odoms_yaw", odoms_yaw)                     
+            odoms_lt_yaw = [float(odom_lt_list[5]) for odom_lt_list in odoms_lt_txt]                                        
             waypoints = to_local_coords(np.array(odoms_xy[1:]), np.array(odoms_xy[0]), np.array(odoms_yaw[0]))
             waypoints_lt = to_local_coords(np.array(odoms_lt_xy[1:]), np.array(odoms_lt_xy[0]), np.array(odoms_lt_yaw[0]))            
-            #print("waypoints", waypoints)    
-            #print(self.data_config["metric_waypoint_spacing"] * self.waypoint_spacing)
-            #norm_param = self.data_config["metric_waypoint_spacing"] * self.waypoint_spacing
             norm_param = 0.125
             actions_all = [[waypoints[i].tolist()[0]/norm_param, waypoints[i].tolist()[1]/norm_param, np.cos(odoms_yaw[i+1] - odoms_yaw[0]), np.sin(odoms_yaw[i+1] - odoms_yaw[0])] for i in range(9)]
             actions_lt_all = [[waypoints_lt[i].tolist()[0]/norm_param, waypoints_lt[i].tolist()[1]/norm_param, np.cos(odoms_lt_yaw[i+1] - odoms_lt_yaw[0]), np.sin(odoms_lt_yaw[i+1] - odoms_lt_yaw[0])] for i in range(9)]
                         
-            #print(actions_all, goal_id)
             actions = np.array(actions_all[0:-1])
             actions_lt = np.array(actions_lt_all[0:-1])
                         
-            #if np.max(np.abs(actions)) > 15.0:
-            #if False:
-            #    flag_data = 0
-            #    iv = random.randint(0, len(self.image_path)-50-1)
-               
             dist = np.sqrt((actions[7,0]-actions_lt[7,0])**2 + (actions[7,1]-actions_lt[7,1])**2)
-            #dist = 10.0
-            #if dist > 4.0:
-            
             if rand_dist > 0.9 and dist > 4.0:
                 flag_data = 1
             elif not rand_dist > 0.9:
@@ -348,44 +303,10 @@ class SACSoN_Dataset_rand(Dataset):
                 iv = random.randint(0, len(self.image_path)-50-1)  
             
             if np.max(np.abs(actions)) > 15.0:
-            #if False:
                 flag_data = 0
                 iv = random.randint(0, len(self.image_path)-50-1)
 
-            
-            goal_pose_cos_sin = np.array(actions_lt_all[-1])
-            
-            #print(actions_all)
-            #print(self.data_config["metric_waypoint_spacing"] * self.waypoint_spacing, goal_pose_cos_sin)
-            #print("actions", actions)                                     
-            #print("goal_pose_cos_sin", goal_pose_cos_sin)                                                                                                                   
-            #odom = self.odom_path[iv]
-            """                       
-            pickle_values = self.aug_data_list[iv]                                    
-            if len(pickle_values) != 0:
-                list_rand = [random.randint(0, len(pickle_values)-1) for i in range(len(pickle_values))]  
-                il = 0                
-                ir = list_rand[il]        
-                c_pose_check = 0
-                
-                pose_obj = pickle_vif rand_dist > 0.5 and dist > 4.0:alues[ir]["pose_median"][0] #pose on robot coordinate
-                
-                try:                           
-                    nomad_traj_norm = pickle_values[ir]["nomad_traj_norm"] #normalized pose on robot coordinate
-                    ii = random.randint(0, len(pickle_values[ir]["prompt"])-1)
-                    inst_obj = pickle_values[ir]["prompt"][ii]
-                    inst_obj_x = inst_obj[0]             
-                    if isinstance(inst_obj_x, str):
-                        flag_data = 1
-                    else:     
-                        iv = random.randint(0, len(self.image_path)-1)                                        
-                except:
-                    iv = random.randint(0, len(self.image_path)-1)
-
-            else:
-                iv = random.randint(0, len(self.image_path)-1)
-            """
-            
+            goal_pose_cos_sin = np.array(actions_lt_all[-1])            
             
         voffset = int(224.0*self.v_random*random.random())
         hoffset = int(224.0*self.h_random*random.random())  
@@ -412,9 +333,6 @@ class SACSoN_Dataset_rand(Dataset):
         if random.random() > 0.5:       
             image_obs_r = torch.flip(image_obs, [2])
             goal_image_full_8_r = torch.flip(goal_image_full_8, [2])            
-            #ob_pose_r = np.array((pose_obj[0], -pose_obj[1]))       
-            #nomad_traj_norm[:,1] = -nomad_traj_norm[:,1]
-            #nomad_traj_norm[:,3] = -nomad_traj_norm[:,3]
             actions[:,1] = -actions[:,1]
             actions[:,3] = -actions[:,3]  
             actions_lt[:,1] = -actions_lt[:,1]
@@ -427,30 +345,12 @@ class SACSoN_Dataset_rand(Dataset):
         else:
             image_obs_r = image_obs
             goal_image_full_8_r = goal_image_full_8            
-            #ob_pose_r = np.array((pose_obj[0], pose_obj[1]))
             cropped_image_fullsize_PIL_r = cropped_image_fullsize_PIL
             cropped_cimage_fullsize_PIL_r = cropped_cimage_fullsize_PIL            
             cropped_gimage_fullsize_PIL_r = cropped_gimage_fullsize_PIL
-            #nomad_traj_norm = nomad_traj_norm
             actions = actions 
             actions_lt = actions_lt             
             goal_pose_cos_sin = goal_pose_cos_sin 
-                                                        
-        #ob_pose_norm = ob_pose_r/self.data_config["metric_waypoint_spacing"] * self.waypoint_spacing
-        #action_mask = (True)
-
-        #thres_dist = 1.5         
-        #dist_obj = np.sqrt(ob_pose_r[0]**2 + ob_pose_r[1]**2)
-        #if dist_obj > thres_dist:
-        #    ob_pose_r[0] = ob_pose_r[0]/dist_obj*thres_dist
-        #    ob_pose_r[1] = ob_pose_r[1]/dist_obj*thres_dist   
-        #
-        #ob_pose_robot = np.array((ob_pose_r[0], ob_pose_r[1])) #on robot coordinate
-        #
-        #dis_obj = np.sqrt(ob_pose_robot[0:1]**2 + ob_pose_robot[1:2]**2)
-        #metric_waypoint_spacing = 0.25
-        #obj_pose_norm = np.concatenate((ob_pose_robot[0:1]/metric_waypoint_spacing, ob_pose_robot[1:2]/metric_waypoint_spacing), axis=0)
-        #goal_pose_cos_sin = np.concatenate((ob_pose_robot[0:1]/metric_waypoint_spacing, ob_pose_robot[1:2]/metric_waypoint_spacing, ob_pose_robot[0:1]/dis_obj, ob_pose_robot[1:2]/dis_obj), axis=0) #Adapting ViNT style action commands (X, Y, cos, sin)            
 
         # Set the available modality id for each dataset 
         # 0:"satellite only", 1:"pose and satellite", 2:"satellite and image", 3:"all", 4:"pose only", 5:"pose and image", 6:"image only", 7:"language only", 8:"language and pose"
@@ -500,7 +400,6 @@ class SACSoN_Dataset_rand(Dataset):
             
         #action select 1.0: raw action, 0.0: MBRA synthetic action            
         action_select_mask = torch.tensor(1.0)            
-        #print(actions.shape)
                         
         return dict(
             pixel_values=pixel_values, 
@@ -509,8 +408,7 @@ class SACSoN_Dataset_rand(Dataset):
             labels=labels, 
             dataset_name=dataset_name, 
             modality_id=modality_id,
-            actions=torch.as_tensor(actions), 
-            #actions=torch.as_tensor(np.concatenate((actions, actions_lt), axis=0)),  
+            actions=torch.as_tensor(actions),  
             action_select_mask = action_select_mask,
             goal_pose=goal_pose_cos_sin, 
             delay_pose=goal_pose_cos_sin, #tempolarily delay_pose = goal_pose       

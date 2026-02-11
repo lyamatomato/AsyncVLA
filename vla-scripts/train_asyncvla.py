@@ -883,7 +883,7 @@ def train_asyncvla(cfg: OmniVLAConfig) -> None:
     with open("./config_nav/dataset_config.yaml", "r") as f:        
         config = yaml.safe_load(f)      
 
-    #defining small head
+    #defining edge adapter
     shead = Edge_adapter(
         obs_encoding_size=config["obs_encoding_size"],
         mha_num_attention_heads=config["mha_num_attention_heads"],

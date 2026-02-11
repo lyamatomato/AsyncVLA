@@ -1,17 +1,22 @@
 # ===============================================================
-# OmniVLA Inference
+# AsyncVLA Inference
 # ===============================================================
 # 
-# Sample inference code for OmniVLA
-# if you want to control the robot, you need to update the current state such as pose and image in "run_omnivla" and comment out "break" in "run".
+# Sample inference code for AsyncVLA
+# if you want to control the robot, you need to update the current state such as pose and image in "run_asyncvla" and comment out "break" in "run".
 #
 # ---------------------------
 # Paths and System Setup
 # ---------------------------
 import sys, os
-sys.path.insert(0, '..')
+#sys.path.insert(0, '..')
+sys.path.extend([
+    "/media/noriaki/Noriaki_Data/Learning-to-Drive-Anywhere-with-MBRA/train/", '/media/noriaki/Noriaki_Data/lerobot'
+    #"../Learning-to-Drive-Anywhere-with-MBRA/train/", '../lerobot'
+])
 
 import time, math, json
+import yaml
 from typing import Optional, Tuple, Type, Dict
 from dataclasses import dataclass
 
@@ -22,6 +27,8 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torchvision.transforms as transforms
+from torchvision.transforms.functional import to_tensor
+import torchvision.transforms.functional as TF
 import matplotlib.pyplot as plt
 import utm
 
@@ -37,8 +44,14 @@ from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, Pr
 from prismatic.models.backbones.llm.prompting import PurePromptBuilder
 from prismatic.training.train_utils import get_current_action_mask, get_next_actions_mask
 from prismatic.vla.constants import ACTION_DIM, NUM_ACTIONS_CHUNK, POSE_DIM, ACTION_PROPRIO_NORMALIZATION_TYPE
+from prismatic.models.small_head import Edge_adapter, Proj_Actiontokens
 
 from transformers import AutoConfig, AutoProcessor, AutoModelForVision2Seq, AutoImageProcessor
+
+transform = transforms.Compose([
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
+])
 
 # ===============================================================
 # Utility Functions
@@ -77,6 +90,45 @@ def init_module(
         module = module.to(torch.bfloat16)
     module = module.to(device_id)
     return module
+
+def delta_to_pose(delta):
+    """
+    Fully differentiable, no inplace ops.
+    delta: [N, T, 4]
+    """
+    dx = delta[..., 0]
+    dy = delta[..., 1]
+    dtheta = torch.atan2(delta[..., 3], delta[..., 2])
+
+    N, T = dx.shape
+
+    # Allocate list, then stack (safe)
+    poses = []
+
+    # Initial pose
+    x = dx[:, 0]
+    y = dy[:, 0]
+    theta = dtheta[:, 0]
+
+    poses.append(torch.stack([x, y, torch.cos(theta), torch.sin(theta)], dim=-1))
+
+    # Loop for t >= 1
+    for t in range(1, T):
+        ct = torch.cos(theta)
+        st = torch.sin(theta)
+
+        dx_w = ct * dx[:, t] - st * dy[:, t]
+        dy_w = st * dx[:, t] + ct * dy[:, t]
+
+        # NEW tensors — NOT inplace updates
+        x = x + dx_w
+        y = y + dy_w
+        theta = theta + dtheta[:, t]
+
+        poses.append(torch.stack([x, y, torch.cos(theta), torch.sin(theta)], dim=-1))
+
+    # Stack at the end
+    return torch.stack(poses, dim=1)
 
 # ===============================================================
 # Inference Class
@@ -119,12 +171,12 @@ class Inference:
                 break
 
     def tick(self):
-        self.linear, self.angular = self.run_omnivla()
+        self.run_asyncvla()
 
     # ----------------------------
-    # OmniVLA Inference
+    # AsyncVLA Inference
     # ----------------------------
-    def run_omnivla(self):
+    def run_asyncvla(self):
         thres_dist = 30.0
         metric_waypoint_spacing = 0.1
 
@@ -144,36 +196,53 @@ class Inference:
         if radius > thres_dist:
             relative_x *= thres_dist / radius
             relative_y *= thres_dist / radius
-
+        """
         goal_pose_loc_norm = np.array([
             relative_y / metric_waypoint_spacing,
             -relative_x / metric_waypoint_spacing,
             np.cos(self.goal_compass - cur_compass),
             np.sin(self.goal_compass - cur_compass)
         ])
-
+        """
+        goal_pose_loc_norm = np.array([
+            1.0 / metric_waypoint_spacing,
+            -10.0 / metric_waypoint_spacing,
+            np.cos(-90.0/180.0*3.1415),
+            np.sin(-90.0/180.0*3.1415)
+        ])
+        
         # Load current image
-        current_image_path = "./inference/current_img.jpg"
-        current_image_PIL = Image.open(current_image_path).convert("RGB")
-
+        current_image_path = "./inference/past.png"
+        current_image_PIL = Image.open(current_image_path).convert("RGB").resize((224, 224), Image.BILINEAR)
+        next_image_path = "./inference/cur.png"
+        next_image_PIL = Image.open(next_image_path).convert("RGB").resize((224, 224), Image.BILINEAR)
+        
         # Language instruction
         lan_inst = self.lan_inst_prompt if lan_prompt else "xxxx"
+        """
+        p_image=TF.resize(to_tensor(current_image_PIL), (96, 96)),    
+        c_image=TF.resize(to_tensor(current_image_PIL), (96, 96)), 
 
         # Prepare batch
-        batch = self.data_transformer_omnivla(
-            current_image_PIL, lan_inst, self.goal_image_PIL, goal_pose_loc_norm,
+        batch = self.data_transformer_asyncvla(
+            current_image_PIL, p_image, c_image, lan_inst, self.goal_image_PIL, goal_pose_loc_norm,
             prompt_builder=PurePromptBuilder,
             action_tokenizer=self.action_tokenizer,
             processor=self.processor
         )
-
+        """
         # Run forward pass
-        actions, modality_id = self.run_forward_pass(
+        actions_list, modality_id = self.run_forward_pass(
             vla=vla.eval(),
             action_head=action_head.eval(),
+            action_proj=action_proj.eval(),
+            shead=shead.eval(),
             noisy_action_projector=None,
             pose_projector=pose_projector.eval(),
-            batch=batch,
+            current_image_PIL=current_image_PIL,
+            lan_inst=lan_inst,
+            goal_pose_loc_norm=goal_pose_loc_norm,
+            metric_waypoint_spacing=metric_waypoint_spacing,
             action_tokenizer=self.action_tokenizer,
             device_id=device_id,
             use_l1_regression=True,
@@ -187,67 +256,15 @@ class Inference:
         )
         self.count_id += 1
 
-        waypoints = actions.float().cpu().numpy()
-
-        # Select waypoint
-        waypoint_select = 4
-        chosen_waypoint = waypoints[0][waypoint_select].copy()
-        chosen_waypoint[:2] *= metric_waypoint_spacing
-        dx, dy, hx, hy = chosen_waypoint
-
-        # PD controller
-        EPS = 1e-8
-        DT = 1 / 3
-        if np.abs(dx) < EPS and np.abs(dy) < EPS:
-            linear_vel_value = 0
-            angular_vel_value = 1.0 * clip_angle(np.arctan2(hy, hx)) / DT
-        elif np.abs(dx) < EPS:
-            linear_vel_value = 0
-            angular_vel_value = 1.0 * np.sign(dy) * np.pi / (2 * DT)
-        else:
-            linear_vel_value = dx / DT
-            angular_vel_value = np.arctan(dy / dx) / DT
-
-        linear_vel_value = np.clip(linear_vel_value, 0, 0.5)
-        angular_vel_value = np.clip(angular_vel_value, -1.0, 1.0)
-
-        # Velocity limitation
-        maxv, maxw = 0.3, 0.3
-        if np.abs(linear_vel_value) <= maxv:
-            if np.abs(angular_vel_value) <= maxw:
-                linear_vel_value_limit = linear_vel_value
-                angular_vel_value_limit = angular_vel_value
-            else:
-                rd = linear_vel_value / angular_vel_value
-                linear_vel_value_limit = maxw * np.sign(linear_vel_value) * np.abs(rd)
-                angular_vel_value_limit = maxw * np.sign(angular_vel_value)
-        else:
-            if np.abs(angular_vel_value) <= 0.001:
-                linear_vel_value_limit = maxv * np.sign(linear_vel_value)
-                angular_vel_value_limit = 0.0
-            else:
-                rd = linear_vel_value / angular_vel_value
-                if np.abs(rd) >= maxv / maxw:
-                    linear_vel_value_limit = maxv * np.sign(linear_vel_value)
-                    angular_vel_value_limit = maxv * np.sign(angular_vel_value) / np.abs(rd)
-                else:
-                    linear_vel_value_limit = maxw * np.sign(linear_vel_value) * np.abs(rd)
-                    angular_vel_value_limit = maxw * np.sign(angular_vel_value)
-
         # Save behavior
         self.save_robot_behavior(
-            current_image_PIL, self.goal_image_PIL, goal_pose_loc_norm, waypoints[0],
-            linear_vel_value_limit, angular_vel_value_limit, metric_waypoint_spacing, modality_id.cpu().numpy()
+            current_image_PIL, next_image_PIL, goal_pose_loc_norm, actions_list, metric_waypoint_spacing, modality_id.cpu().numpy()
         )
-
-        print("linear angular", linear_vel_value_limit, angular_vel_value_limit)
-        return linear_vel_value_limit, angular_vel_value_limit
 
     # ----------------------------
     # Save Robot Behavior Visualization
     # ----------------------------
-    def save_robot_behavior(self, cur_img, goal_img, goal_pose, waypoints,
-                            linear_vel, angular_vel, metric_waypoint_spacing, mask_number):
+    def save_robot_behavior(self, cur_img, goal_img, goal_pose, actions_list, metric_waypoint_spacing, mask_number):
         fig = plt.figure(figsize=(34, 16), dpi=80)
         gs = fig.add_gridspec(2, 2)
         ax_ob = fig.add_subplot(gs[0, 0])
@@ -257,10 +274,14 @@ class Inference:
         ax_ob.imshow(np.array(cur_img).astype(np.uint8))
         ax_goal.imshow(np.array(goal_img).astype(np.uint8))
 
-        x_seq = waypoints[:, 0] #generated trajectory is on the robot coordinate. X is front and Y is left. 
-        y_seq_inv = -waypoints[:, 1]           
-        ax_graph_pos.plot(np.insert(y_seq_inv, 0, 0.0), np.insert(x_seq, 0, 0.0), linewidth=4.0, markersize=12, marker='o', color='blue')
-
+        x_seq_1 = actions_list[0][0, :, 0] #generated trajectory is on the robot coordinate. X is front and Y is left. 
+        y_seq_inv_1 = -actions_list[0][0, :, 1]           
+        x_seq_2 = actions_list[1][0, :, 0] #generated trajectory is on the robot coordinate. X is front and Y is left. 
+        y_seq_inv_2 = -actions_list[1][0, :, 1]        
+                
+        ax_graph_pos.plot(np.insert(y_seq_inv_1, 0, 0.0), np.insert(x_seq_1, 0, 0.0), linewidth=4.0, markersize=12, marker='o', color='blue', label="1st image for edge adapter")
+        ax_graph_pos.plot(np.insert(y_seq_inv_2, 0, 0.0), np.insert(x_seq_2, 0, 0.0), linewidth=4.0, markersize=12, marker='o', color='red', label="2nd image for edge adapter")
+        
         # Mask annotation
         mask_type = int(mask_number[0])
         mask_texts = [
@@ -270,8 +291,8 @@ class Inference:
         if mask_type < len(mask_texts):
             ax_graph_pos.annotate(mask_texts[mask_type], xy=(1.0, 0.0), xytext=(-20, 20), fontsize=18, textcoords='offset points')
 
-        ax_ob.set_title("Egocentric current image", fontsize=18)
-        ax_goal.set_title("Egocentric goal image", fontsize=18)
+        ax_ob.set_title("1st egocentric image", fontsize=18)
+        ax_goal.set_title("2nd Egocentric image", fontsize=18)
         ax_graph_pos.tick_params(axis='x', labelsize=15) 
         ax_graph_pos.tick_params(axis='y', labelsize=15) 
         
@@ -280,12 +301,12 @@ class Inference:
         else:                           
             ax_graph_pos.set_xlim(-3.0, 3.0)
             ax_graph_pos.set_ylim(-0.1, 10.0)
-        ax_graph_pos.set_xlim(-3.0, 3.0)
-        ax_graph_pos.set_ylim(-0.1, 10.0)
-                        
-        ax_graph_pos.set_title("Normalized generated 2D trajectories from OmniVLA", fontsize=18)
+        ax_graph_pos.set_xlim(-6.0, 6.0)
+        ax_graph_pos.set_ylim(-0.1, 12.0)
+        ax_graph_pos.legend()                
+        ax_graph_pos.set_title("Normalized generated 2D trajectories from AsyncVLA", fontsize=18)
         
-        save_path = os.path.join(self.datastore_path_image, f"{self.count_id}_ex.jpg")
+        save_path = os.path.join(self.datastore_path_image, "visualization_asyncvla.jpg")
         plt.savefig(save_path)
 
     # ----------------------------
@@ -315,7 +336,7 @@ class Inference:
 
         actions = torch.stack([torch.from_numpy(np.copy(inst["actions"])) for inst in instances])
         goal_pose = torch.stack([torch.from_numpy(np.copy(inst["goal_pose"])) for inst in instances])
-
+        
         output = dict(
             pixel_values=pixel_values.to(),
             input_ids=input_ids,
@@ -381,10 +402,9 @@ class Inference:
         )
 
     # ----------------------------
-    # Data Transformer for OmniVLA
+    # Data Transformer for AsyncVLA
     # ----------------------------
-    def data_transformer_omnivla(self, current_image_PIL, lan_inst, goal_image_PIL, goal_pose_loc_norm,
-                                 prompt_builder, action_tokenizer, processor):
+    def data_transformer_asyncvla(self, current_image_PIL, lan_inst, goal_image_PIL, goal_pose_loc_norm, action_tokenizer, processor):
         actions = np.random.rand(8, 4)  # dummy actions
         goal_pose_cos_sin = goal_pose_loc_norm
 
@@ -405,13 +425,69 @@ class Inference:
         )
         return batch
 
+    def pd_controller(self, actions, metric_waypoint_spacing):
+        waypoints = actions.float().cpu().numpy()
+
+        # Select waypoint
+        waypoint_select = 4
+        chosen_waypoint = waypoints[0][waypoint_select].copy()
+        chosen_waypoint[:2] *= metric_waypoint_spacing
+        dx, dy, hx, hy = chosen_waypoint
+
+        # PD controller
+        EPS = 1e-8
+        DT = 1 / 3
+        if np.abs(dx) < EPS and np.abs(dy) < EPS:
+            linear_vel_value = 0
+            angular_vel_value = 1.0 * clip_angle(np.arctan2(hy, hx)) / DT
+        elif np.abs(dx) < EPS:
+            linear_vel_value = 0
+            angular_vel_value = 1.0 * np.sign(dy) * np.pi / (2 * DT)
+        else:
+            linear_vel_value = dx / DT
+            angular_vel_value = np.arctan(dy / dx) / DT
+
+        linear_vel_value = np.clip(linear_vel_value, 0, 0.5)
+        angular_vel_value = np.clip(angular_vel_value, -1.0, 1.0)
+
+        # Velocity limitation
+        maxv, maxw = 0.3, 0.3
+        if np.abs(linear_vel_value) <= maxv:
+            if np.abs(angular_vel_value) <= maxw:
+                linear_vel_value_limit = linear_vel_value
+                angular_vel_value_limit = angular_vel_value
+            else:
+                rd = linear_vel_value / angular_vel_value
+                linear_vel_value_limit = maxw * np.sign(linear_vel_value) * np.abs(rd)
+                angular_vel_value_limit = maxw * np.sign(angular_vel_value)
+        else:
+            if np.abs(angular_vel_value) <= 0.001:
+                linear_vel_value_limit = maxv * np.sign(linear_vel_value)
+                angular_vel_value_limit = 0.0
+            else:
+                rd = linear_vel_value / angular_vel_value
+                if np.abs(rd) >= maxv / maxw:
+                    linear_vel_value_limit = maxv * np.sign(linear_vel_value)
+                    angular_vel_value_limit = maxv * np.sign(angular_vel_value) / np.abs(rd)
+                else:
+                    linear_vel_value_limit = maxw * np.sign(linear_vel_value) * np.abs(rd)
+                    angular_vel_value_limit = maxw * np.sign(angular_vel_value)
+                    
+        return linear_vel_value_limit, angular_vel_value_limit                
+        
     # ----------------------------
     # Run Forward Pass
     # ----------------------------
-    def run_forward_pass(self, vla, action_head, noisy_action_projector, pose_projector,
-                         batch, action_tokenizer, device_id, use_l1_regression, use_diffusion,
+    def run_forward_pass(self, vla, action_head, action_proj, shead, noisy_action_projector, pose_projector,
+                         current_image_PIL, lan_inst, goal_pose_loc_norm, metric_waypoint_spacing, action_tokenizer, device_id, use_l1_regression, use_diffusion,
                          use_film, num_patches, compute_diffusion_l1=False,
                          num_diffusion_steps_train=None, mode="vali", idrun=0) -> Tuple[torch.Tensor, Dict[str, float]]:
+        
+        batch = self.data_transformer_asyncvla(
+            current_image_PIL, lan_inst, self.goal_image_PIL, goal_pose_loc_norm,
+            action_tokenizer=self.action_tokenizer,
+            processor=self.processor
+        )
 
         metrics = {}
         noise, noisy_actions, diffusion_timestep_embeddings = None, None, None
@@ -436,6 +512,12 @@ class Inference:
         elif not satellite and lan_prompt and pose_goal and not image_goal:
             modality_id = torch.as_tensor([8], dtype=torch.float32)
 
+        #For Edge adapter
+        #img_cur = transform(c_image).to(device_id).to(torch.bfloat16)
+        #img_past = transform(p_image).to(device_id).to(torch.bfloat16)        
+        #img_cur = transform(batch["c_image"]).to(device_id).to(torch.bfloat16)
+        #img_past = transform(batch["p_image"]).to(device_id).to(torch.bfloat16)
+
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
             output: CausalLMOutputWithPast = vla(
                 input_ids=batch["input_ids"].to(device_id),
@@ -459,8 +541,9 @@ class Inference:
          
         # Get last layer hidden states
         last_hidden_states = output.hidden_states[-1]  # (B, seq_len, D)
+        
         # Get hidden states for text portion of prompt+response (after the vision patches)
-        text_hidden_states = last_hidden_states[:, num_patches:-1]
+        text_hidden_states = last_hidden_states[:, num_patches:-1]              
         # Get hidden states for action portion of response
         batch_size = batch["input_ids"].shape[0]
         actions_hidden_states = (
@@ -470,10 +553,36 @@ class Inference:
         )  # (B, act_chunk_len, D)
 
         with torch.no_grad():
-            predicted_actions = action_head.predict_action(actions_hidden_states, modality_id.to(torch.bfloat16).to(device_id))                                 
+            projected_actions = action_proj.predict_action(actions_hidden_states.detach(), modality_id.to(torch.bfloat16).to(device_id))
+
+        past_image_path = "./inference/past.png" 
+        past_image_PIL = Image.open(past_image_path).convert("RGB").resize((224, 224), Image.BILINEAR)
+        p_image=TF.resize(to_tensor(past_image_PIL), (96, 96)).unsqueeze(0)   
+        img_past = transform(p_image).to(device_id).to(torch.bfloat16)    
+        
+        predicted_actions_list = []
+        for i in range(2):
+            # Load current image        
+            if i==0:
+                current_image_path = "./inference/past.png"                               
+            elif i==1:
+                current_image_path = "./inference/cur.png"                               
+            current_image_PIL = Image.open(current_image_path).convert("RGB").resize((224, 224), Image.BILINEAR)                 
+            c_image=TF.resize(to_tensor(current_image_PIL), (96, 96)).unsqueeze(0) 
+            img_cur = transform(c_image).to(device_id).to(torch.bfloat16)        
+            # Predict action
+            with torch.no_grad():
+                predicted_dactions = shead(img_cur, img_past, projected_actions)
+                predicted_actions = delta_to_pose(predicted_dactions) 
+            linear_vel, angular_vel = self.pd_controller(predicted_actions.cpu(), metric_waypoint_spacing)  
+            print("action pose chunk", predicted_actions)                
+            print("linear velocity", linear_vel)
+            print("angular velocity", angular_vel)                                            
+            predicted_actions_list.append(predicted_actions.cpu().float())
 
         # Return both the loss tensor (with gradients) and the metrics dictionary (with detached values)
-        return predicted_actions, modality_id
+        return predicted_actions_list, modality_id
+
 
                 
 # ===============================================================
@@ -481,10 +590,8 @@ class Inference:
 # ===============================================================
 class InferenceConfig:
     resume: bool = True
-    vla_path: str = "./omnivla-original"
-    resume_step: Optional[int] = 120000    
-    #vla_path: str = "./omnivla-finetuned-cast"    
-    #resume_step: Optional[int] = 210000
+    vla_path: str = "./AsyncVLA_release"
+    resume_step: Optional[int] = 750000    
     use_l1_regression: bool = True
     use_diffusion: bool = False
     use_film: bool = False
@@ -526,25 +633,60 @@ def define_model(cfg: InferenceConfig) -> None:
     
     vla.vision_backbone.set_num_images_in_input(cfg.num_images_in_input)
     vla.to(dtype=torch.bfloat16, device=device_id)
-    
+
+    # If applicable, instantiate proprio projector
     pose_projector = init_module(
         ProprioProjector,
         "pose_projector",
         cfg,
         device_id,
-        {"llm_dim": vla.llm_dim, "proprio_dim": POSE_DIM},            
+        {"llm_dim": vla.llm_dim, "proprio_dim": POSE_DIM},
+    )
+
+    action_head = init_module(
+        L1RegressionActionHead_idcat,
+        "action_head",
+        cfg,
+        device_id,
+        {"input_dim": vla.llm_dim, "hidden_dim": vla.llm_dim, "action_dim": ACTION_DIM},
+        to_bf16=True,
+    )
+
+    action_proj = init_module(
+        Proj_Actiontokens,
+        "action_proj",
+        cfg,
+        device_id,
+        {"input_dim": vla.llm_dim, "hidden_dim": vla.llm_dim, "action_dim": 1024},
+        to_bf16=True,
     )
     
-    if cfg.use_l1_regression:
-        action_head = init_module(
-            L1RegressionActionHead_idcat,
-            "action_head",
-            cfg,
-            device_id,
-            {"input_dim": vla.llm_dim, "hidden_dim": vla.llm_dim, "action_dim": ACTION_DIM},            
-            to_bf16=True,
-        )            
- 
+    #defining edge adapter
+    with open("./config_nav/dataset_config.yaml", "r") as f:        
+        config = yaml.safe_load(f)      
+    
+    shead = Edge_adapter(
+        obs_encoding_size=config["obs_encoding_size"],
+        mha_num_attention_heads=config["mha_num_attention_heads"],
+        mha_num_attention_layers=config["mha_num_attention_layers"],
+        mha_ff_dim_factor=config["mha_ff_dim_factor"],
+        )
+    
+    if cfg.resume and os.path.exists(os.path.join(cfg.vla_path, f"shead--{cfg.resume_step}_checkpoint.pt")):
+        checkpoint_path_shead = os.path.join(cfg.vla_path, f"shead--{cfg.resume_step}_checkpoint.pt")
+        print("Loading shead model from ", checkpoint_path_shead)
+        latest_checkpoint_shead = torch.load(checkpoint_path_shead, map_location="cpu")
+        state_dict = latest_checkpoint_shead
+        if any(k.startswith("module.") for k in state_dict.keys()):
+            print("Detected DDP-style checkpoint, removing 'module.' prefix...")
+            state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
+
+        missing, unexpected = shead.load_state_dict(state_dict, strict=False)
+        print("Missing keys:", missing)
+        print("Unexpected keys:", unexpected)
+    
+    shead.to(torch.bfloat16).to(device=device_id)
+    
     # Get number of vision patches
     NUM_PATCHES = vla.vision_backbone.get_num_patches() * vla.vision_backbone.get_num_images_in_input()    
     NUM_PATCHES += 1 #for goal pose
@@ -552,16 +694,16 @@ def define_model(cfg: InferenceConfig) -> None:
     # Create Action Tokenizer
     action_tokenizer = ActionTokenizer(processor.tokenizer)
 
-    return vla, action_head, pose_projector, device_id, NUM_PATCHES, action_tokenizer, processor
+    return vla, action_head, pose_projector, shead, action_proj, device_id, NUM_PATCHES, action_tokenizer, processor
 
 # ===============================================================
 # Main Entry
 # ===============================================================
 if __name__ == "__main__":
     # select modality
-    pose_goal = False
+    pose_goal = True
     satellite = False
-    image_goal = True
+    image_goal = False
     lan_prompt = False
 
     # Goal definitions
@@ -569,11 +711,11 @@ if __name__ == "__main__":
     goal_lat, goal_lon, goal_compass = 37.8738930785863, -122.26746181032362, 0.0
     goal_utm = utm.from_latlon(goal_lat, goal_lon)
     goal_compass = -float(goal_compass) / 180.0 * math.pi
-    goal_image_PIL = Image.open("./inference/goal_img.jpg").convert("RGB")
+    goal_image_PIL = Image.open("./inference/goal.png").convert("RGB").resize((224, 224), Image.BILINEAR)
 
     # Define models (VLA, action_head, pose_projector, processor, etc.)
     cfg = InferenceConfig()
-    vla, action_head, pose_projector, device_id, NUM_PATCHES, action_tokenizer, processor = define_model(cfg)
+    vla, action_head, pose_projector, shead, action_proj, device_id, NUM_PATCHES, action_tokenizer, processor = define_model(cfg)
 
     # Run inference
     inference = Inference(
