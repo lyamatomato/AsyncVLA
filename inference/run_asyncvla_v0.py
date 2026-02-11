@@ -2,7 +2,7 @@
 # AsyncVLA Inference
 # ===============================================================
 # 
-# Sample inference code for AsyncVLA
+# Sample inference code for AsyncVLA_v0
 # if you want to control the robot, you need to update the current state such as pose and image in "run_asyncvla"
 #
 # ---------------------------
@@ -42,7 +42,7 @@ from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, Pr
 from prismatic.models.backbones.llm.prompting import PurePromptBuilder
 from prismatic.training.train_utils import get_current_action_mask, get_next_actions_mask
 from prismatic.vla.constants import ACTION_DIM, NUM_ACTIONS_CHUNK, POSE_DIM, ACTION_PROPRIO_NORMALIZATION_TYPE
-from prismatic.models.small_head import Edge_adapter, Proj_Actiontokens
+from prismatic.models.small_head import Edge_adapter_v0, Proj_Actiontokens
 
 from transformers import AutoConfig, AutoProcessor, AutoModelForVision2Seq, AutoImageProcessor
 
@@ -572,7 +572,8 @@ class Inference:
             img_cur = transform(c_image).to(device_id).to(torch.bfloat16)        
             # Predict action
             with torch.no_grad():
-                predicted_dactions = shead(img_cur, img_past, projected_actions)
+                modality_id_fix = torch.as_tensor([4], dtype=torch.float32)
+                predicted_dactions = shead(img_cur, img_past, projected_actions, modality_id_fix.to(torch.bfloat16).to(device_id))
                 predicted_actions = delta_to_pose(predicted_dactions) 
             linear_vel, angular_vel = self.pd_controller(predicted_actions.cpu(), metric_waypoint_spacing)  
             print("action pose chunk", predicted_actions)                
@@ -590,8 +591,8 @@ class Inference:
 # ===============================================================
 class InferenceConfig:
     resume: bool = True
-    vla_path: str = "./AsyncVLA_release"
-    resume_step: Optional[int] = 750000    
+    vla_path: str = "./AsyncVLA_v0"
+    resume_step: Optional[int] = 845000    
     use_l1_regression: bool = True
     use_diffusion: bool = False
     use_film: bool = False
@@ -665,7 +666,7 @@ def define_model(cfg: InferenceConfig) -> None:
     with open("./config_nav/dataset_config.yaml", "r") as f:        
         config = yaml.safe_load(f)      
     
-    shead = Edge_adapter(
+    shead = Edge_adapter_v0(
         obs_encoding_size=config["obs_encoding_size"],
         mha_num_attention_heads=config["mha_num_attention_heads"],
         mha_num_attention_layers=config["mha_num_attention_layers"],
