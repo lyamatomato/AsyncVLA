@@ -60,8 +60,8 @@ We implement our ideas and design choices on top of the pretrained checkpoints. 
       title={AsyncVLA: An Asynchronous VLA for Fast and Robust Navigation on the Edge}, 
       author={Noriaki Hirose and Catherine Glossop and Dhruv Shah and Sergey Levine},
       year={2026},
-      eprint={xxxx.xxxxx},
+      eprint={2602.13476},
       archivePrefix={arXiv},
       primaryClass={cs.RO},
-      url={https://arxiv.org/abs/xxxx.xxxxx}, 
+      url={https://arxiv.org/abs/2602.13476}, 
 }
