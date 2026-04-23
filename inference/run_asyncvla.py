@@ -584,18 +584,28 @@ class Inference:
         return predicted_actions_list, modality_id
 
 
-                
+
 # ===============================================================
 # Inference Configuration
 # ===============================================================
 class InferenceConfig:
+    # Whether to load trained weights on top of the base VLA under vla_path.
+    # init_module loads pose_projector, action_head, and action_proj from checkpoint files.
+    # define_model loads shead (edge adapter) from checkpoint files
     resume: bool = True
     vla_path: str = "./AsyncVLA_release"
-    resume_step: Optional[int] = 750000    
-    use_l1_regression: bool = True
-    use_diffusion: bool = False
-    use_film: bool = False
+    # Training step index in checkpoint filenames
+    resume_step: Optional[int] = 750000
+
+    # In OpenVLA, policies can output actions in different ways: discrete bins (token prediction), direction regression or diffusion.
+    use_l1_regression: bool = True # Not used
+    use_diffusion: bool = False # Not used
+    use_film: bool = False # Not used
+
+    # Number of RGB images the vision backbone will process per step.
     num_images_in_input: int = 2
+
+    # Whether to use LoRA to fine-tune the base VLA. Not used for inference.
     use_lora: bool = True
     lora_rank: int = 32
     lora_dropout: float = 0.0
