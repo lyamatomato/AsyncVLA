@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import List, Dict, Optional, Tuple
 from efficientnet_pytorch import EfficientNet
-from vint_train.models.vint.self_attention import MultiLayerDecoder, MultiLayerDecoder_idcat, MultiLayerDecoder_notrans, MultiLayerDecoder_trans
+from vint_train.models.vint.self_attention import MultiLayerDecoder_trans
 from prismatic.vla.constants import ACTION_DIM, ACTION_TOKEN_BEGIN_IDX, IGNORE_INDEX, NUM_ACTIONS_CHUNK, STOP_INDEX
 
 class Edge_adapter(nn.Module):
