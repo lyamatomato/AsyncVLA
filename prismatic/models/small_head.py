@@ -70,6 +70,9 @@ class Edge_adapter(nn.Module):
         obs_encoding = self.compress_obs_enc(obs_encoding)            
 
         tokens = torch.cat((vla_feature, obs_encoding.unsqueeze(1), cat_encoding.unsqueeze(1)), dim=1)
+        print("tokens in:", tokens.shape)
+        dec = self.decoder(tokens)
+        print("decoder out:", dec.shape, dec.dim())
         tokens = self.decoder(tokens)[:,-2:-1,:]
 
         x = tokens.reshape(tokens.shape[0], -1)
