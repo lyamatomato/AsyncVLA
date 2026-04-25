@@ -615,36 +615,52 @@ def define_model(cfg: InferenceConfig) -> None:
     print(f"Loading OpenVLA Model `{cfg.vla_path}`")
 
     # GPU setup
+    # torch.device: an object representing the hardware where a tensor is or will be allocated
     device_id = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     torch.cuda.set_device(device_id)
-    torch.cuda.empty_cache()
+    torch.cuda.empty_cache() # release unused cached memory
 
+    # These constants are determined during training and cannot be changed without retraining the model
+    # Establish the size of action and pose vectors
     print(
         "Detected constants:\n"
-        f"\tNUM_ACTIONS_CHUNK: {NUM_ACTIONS_CHUNK}\n"
-        f"\tACTION_DIM: {ACTION_DIM}\n"
-        f"\tPOSE_DIM: {POSE_DIM}\n"
-        f"\tACTION_PROPRIO_NORMALIZATION_TYPE: {ACTION_PROPRIO_NORMALIZATION_TYPE}"
+        # Short trajectory in (dx, dy dtheta) - 8 waypoints in the plane
+        # Your controller (pd_controller) picks one waypoint and turns into wheel-style commands
+        f"\tNUM_ACTIONS_CHUNK: {NUM_ACTIONS_CHUNK}\n" # number of future action steps the policy predicts in one chunk (8)
+        # (x, y, cos(theta), sin(theta)) - robot pose
+        f"\tACTION_DIM: {ACTION_DIM}\n" # size of one control vectoer per timestep (4)
+        f"\tPOSE_DIM: {POSE_DIM}\n" # Dimension of the robot's pose passed into the model (4)
+        f"\tACTION_PROPRIO_NORMALIZATION_TYPE: {ACTION_PROPRIO_NORMALIZATION_TYPE}" # How actions and pose signals are normalised
     )
 
     # Register OpenVLA model to HF Auto Classes (not needed if the model is on HF Hub)
+    # Load OpenVLA config
     AutoConfig.register("openvla", OpenVLAConfig)
+    # Image processors: turns PIL images into pixel_values tensors -> handles resizing, cropping, and normalisation required by the specific model
     AutoImageProcessor.register(OpenVLAConfig, PrismaticImageProcessor)
+    # Processor: combines image processor and tokenizer -> outputs a BatchFeature with input_ids, attention_mask, and pixel_values
+    # Processor uses class implementation from local prismatic pkg, but the configs are from AsyncVLA_release
     AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
+    # Transformers library designed for multimodal tasks
     AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction_MMNv1)
     
     # Load processor and VLA
+    # Load the multimodal preprocessor for this checkpoint
+    # trust_remote_code=True: allow repo specific classes
     processor = AutoProcessor.from_pretrained(cfg.vla_path, trust_remote_code=True)
+    # Load the processor: vision encoder + language model that maps images + texts to action
     vla = AutoModelForVision2Seq.from_pretrained(
         cfg.vla_path,
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
+        torch_dtype=torch.bfloat16, # Efficient way of storing floats
+        low_cpu_mem_usage=True, # Avoid huge RAM spikes
     ).to(device_id) #            trust_remote_code=True,
     
     vla.vision_backbone.set_num_images_in_input(cfg.num_images_in_input)
     vla.to(dtype=torch.bfloat16, device=device_id)
 
     # If applicable, instantiate proprio projector
+    # Allos the VLA condition on the robot's pose
+    # A small NN that maps a proprio vector (POSE_DIM) to the same embedding dimension as the LLM
     pose_projector = init_module(
         ProprioProjector,
         "pose_projector",
@@ -653,8 +669,10 @@ def define_model(cfg: InferenceConfig) -> None:
         {"llm_dim": vla.llm_dim, "proprio_dim": POSE_DIM},
     )
 
+    # Turns the VLA's hidden states into continuous actions
+    # NOT USED CURRENTLY
     action_head = init_module(
-        L1RegressionActionHead_idcat,
+        L1RegressionActionHead_idcat, # A small MLP trained to predict actions from transformer hidden states
         "action_head",
         cfg,
         device_id,
@@ -662,6 +680,7 @@ def define_model(cfg: InferenceConfig) -> None:
         to_bf16=True,
     )
 
+    # Turns the VLA's hidden states into a latent feature vector of dimension 1024 -> to be consumed by the edge adapter (shead)
     action_proj = init_module(
         Proj_Actiontokens,
         "action_proj",
@@ -675,6 +694,11 @@ def define_model(cfg: InferenceConfig) -> None:
     with open("./config_nav/dataset_config.yaml", "r") as f:        
         config = yaml.safe_load(f)      
     
+    # Small fusion head that combines:
+    # - current image features
+    # - past image features
+    # - VLA's hidden states
+    # then outputs trajectory pose chunks
     shead = Edge_adapter(
         obs_encoding_size=config["obs_encoding_size"],
         mha_num_attention_heads=config["mha_num_attention_heads"],
@@ -682,6 +706,7 @@ def define_model(cfg: InferenceConfig) -> None:
         mha_ff_dim_factor=config["mha_ff_dim_factor"],
         )
     
+    # Load pre-trained weights for the shead if available
     if cfg.resume and os.path.exists(os.path.join(cfg.vla_path, f"shead--{cfg.resume_step}_checkpoint.pt")):
         checkpoint_path_shead = os.path.join(cfg.vla_path, f"shead--{cfg.resume_step}_checkpoint.pt")
         print("Loading shead model from ", checkpoint_path_shead)
@@ -698,10 +723,12 @@ def define_model(cfg: InferenceConfig) -> None:
     shead.to(torch.bfloat16).to(device=device_id)
     
     # Get number of vision patches
+    # Compute how many non-text tokens are prepended before language tokens. So we can later locate the text/action-token region correctly.
     NUM_PATCHES = vla.vision_backbone.get_num_patches() * vla.vision_backbone.get_num_images_in_input()    
     NUM_PATCHES += 1 #for goal pose
 
     # Create Action Tokenizer
+    # Encode action chunks into tokens so then the positions of the action tokens can be determined from the VLA output
     action_tokenizer = ActionTokenizer(processor.tokenizer)
 
     return vla, action_head, pose_projector, shead, action_proj, device_id, NUM_PATCHES, action_tokenizer, processor
