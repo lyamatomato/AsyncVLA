@@ -46,6 +46,8 @@ from prismatic.models.small_head import Edge_adapter, Proj_Actiontokens
 
 from transformers import AutoConfig, AutoProcessor, AutoModelForVision2Seq, AutoImageProcessor
 
+from transformers.modeling_outputs import CausalLMOutputWithPast
+
 transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406],
                          std=[0.229, 0.224, 0.225])
