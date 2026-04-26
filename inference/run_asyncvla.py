@@ -589,6 +589,8 @@ class Inference:
         past_image_PIL = Image.open(past_image_path).convert("RGB").resize((224, 224), Image.BILINEAR)
         p_image=TF.resize(to_tensor(past_image_PIL), (96, 96)).unsqueeze(0)   
         img_past = transform(p_image).to(device_id).to(torch.bfloat16)    
+
+        t3 = _sync_time_ms(device_id)
         
         predicted_actions_list = []
         for i in range(2):
@@ -614,13 +616,14 @@ class Inference:
 
             predicted_actions_list.append(predicted_actions.cpu().float())
         
-        t3 = _sync_time_ms(device_id)
+        t4 = _sync_time_ms(device_id)
 
         print(
             f"VLA Inference time = {t1 - t0:.2f} ms | "
             f"action_proj time = {t2 - t1:.2f} ms | "
-            f"shead_loop time={t3 - t2:.2f} ms | "
-            f"total_inference time = {t3 - t0:.2f} ms"
+            f"image load time = {t3 - t2:.2f} ms | "
+            f"shead_loop time={t4 - t3:.2f} ms | "
+            f"total_inference time = {t4 - t0:.2f} ms"
         )
 
         # Return both the loss tensor (with gradients) and the metrics dictionary (with detached values)
