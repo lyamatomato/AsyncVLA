@@ -130,11 +130,13 @@ def delta_to_pose(delta):
     # Stack at the end
     return torch.stack(poses, dim=1)
 
-# ----------------------------
-# Clip Angle
-# ----------------------------
 def clip_angle(angle):
     return np.arctan2(np.sin(angle), np.cos(angle))
+
+def _sync_time_ms(device):
+    if torch.cuda.is_available() and "cuda" in str(device):
+        torch.cuda.synchronize(device)
+    return time.perf_counter() * 1000.0
 
 
 # ===============================================================
@@ -539,6 +541,8 @@ class Inference:
         #img_cur = transform(batch["c_image"]).to(device_id).to(torch.bfloat16)
         #img_past = transform(batch["p_image"]).to(device_id).to(torch.bfloat16)
 
+        t0 = _sync_time_ms(device_id)
+
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
             output: CausalLMOutputWithPast = vla(
                 input_ids=batch["input_ids"].to(device_id),
@@ -554,6 +558,8 @@ class Inference:
                 diffusion_timestep_embeddings=diffusion_timestep_embeddings if use_diffusion else None, # for diffusion
                 use_film=use_film,
             )
+
+        t1 = _sync_time_ms(device_id)
 
         # To determine the action-related hidden states later on
         ground_truth_token_ids = batch["labels"][:, 1:].to(device_id)
@@ -576,6 +582,8 @@ class Inference:
         # Predict actions from the action portion of hidden states
         with torch.no_grad():
             projected_actions = action_proj.predict_action(actions_hidden_states.detach(), modality_id.to(torch.bfloat16).to(device_id))
+
+        t2 = _sync_time_ms(device_id)
 
         past_image_path = "./inference/past.png" 
         past_image_PIL = Image.open(past_image_path).convert("RGB").resize((224, 224), Image.BILINEAR)
@@ -605,6 +613,15 @@ class Inference:
             print("angular velocity", angular_vel)
 
             predicted_actions_list.append(predicted_actions.cpu().float())
+        
+        t3 = _sync_time_ms(device_id)
+
+        print(
+            f"VLA Inference time = {t1 - t0:.2f} ms | "
+            f"action_proj time = {t2 - t1:.2f} ms | "
+            f"shead_loop time={t3 - t2:.2f} ms | "
+            f"total_inference time = {t3 - t0:.2f} ms"
+        )
 
         # Return both the loss tensor (with gradients) and the metrics dictionary (with detached values)
         return predicted_actions_list, modality_id
