@@ -784,10 +784,10 @@ def define_model(cfg: InferenceConfig) -> None:
 # ===============================================================
 if __name__ == "__main__":
     # select modality
-    pose_goal = True
+    pose_goal = False
     satellite = False
     image_goal = False
-    lan_prompt = False
+    lan_prompt = True
 
     # Goal definitions
     lan_inst_prompt = "move toward blue trash bin"
