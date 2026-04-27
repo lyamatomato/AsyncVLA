@@ -70,9 +70,6 @@ class Edge_adapter(nn.Module):
         obs_encoding = self.compress_obs_enc(obs_encoding)            
 
         tokens = torch.cat((vla_feature, obs_encoding.unsqueeze(1), cat_encoding.unsqueeze(1)), dim=1)
-        print("tokens in:", tokens.shape)
-        dec = self.decoder(tokens)
-        print("decoder out:", dec.shape, dec.dim())
         tokens = self.decoder(tokens)[:,-2:-1,:]
 
         x = tokens.reshape(tokens.shape[0], -1)
@@ -209,10 +206,10 @@ class MLPResNet_idcat(nn.Module):
         self.layer_norm2 = nn.LayerNorm(hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, x, taskid):
+    def forward(self, x):
         # x: (batch_size, input_dim)
         x = self.layer_norm1(x)  # shape: (batch_size, input_dim)
-        x = torch.cat((x, taskid.unsqueeze(1).unsqueeze(2).repeat(1,8,1)), axis=2)     
+        x = torch.cat(x)
         x = self.fc1(x)  # shape: (batch_size, hidden_dim) 
         x = self.relu(x)  # shape: (batch_size, hidden_dim)
         for block in self.mlp_resnet_blocks:
@@ -231,17 +228,17 @@ class Proj_Actiontokens(nn.Module):
     ):
         super().__init__()
         self.action_dim = action_dim
-        self.model = MLPResNet_idcat(
+        # Split-mode projection path: no explicit task-id conditioning.
+        self.model = MLPResNet(
             num_blocks=2, input_dim=input_dim*ACTION_DIM, hidden_dim=hidden_dim, output_dim=action_dim
         )
 
-    def predict_action(self, actions_hidden_states, taskid):
+    def predict_action(self, actions_hidden_states):
         # actions_hidden_states: last hidden states of Transformer corresponding to action tokens in sequence
         # - shape: (batch_size, chunk_len * action_dim, hidden_dim)
         # ground_truth_actions: ground-truth actions
         # - shape: (batch_size, chunk_len, action_dim)
         batch_size = actions_hidden_states.shape[0]
-        device = actions_hidden_states.device
         rearranged_actions_hidden_states = actions_hidden_states.reshape(batch_size, NUM_ACTIONS_CHUNK, -1)
-        action = self.model(rearranged_actions_hidden_states, taskid)
+        action = self.model(rearranged_actions_hidden_states)
         return action
