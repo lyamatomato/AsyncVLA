@@ -280,12 +280,14 @@ class Inference:
         # Modify if you want to use difussion for inference
         noise, noisy_actions, diffusion_timestep_embeddings = None, None, None
 
+        modality_id = torch.as_tensor([7], dtype=torch.float32, device=device_id)
 
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
             output: CausalLMOutputWithPast = vla(
                 input_ids=batch["input_ids"].to(device_id),
                 attention_mask=batch["attention_mask"].to(device_id),
                 pixel_values=batch["pixel_values"].to(torch.bfloat16).to(device_id), # images
+                modality_id=modality_id.to(torch.bfloat16),
                 labels=batch["labels"].to(device_id),
                 output_hidden_states=True,
                 noisy_actions=noisy_actions if use_diffusion else None, # for diffusion
@@ -314,7 +316,10 @@ class Inference:
 
         # Predict actions from the action portion of hidden states
         with torch.no_grad():
-            projected_actions = action_proj.predict_action(actions_hidden_states.detach())
+            projected_actions = action_proj.predict_action(
+                actions_hidden_states.detach(),
+                modality_id.to(torch.bfloat16),
+            )
 
         # Return both the loss tensor (with gradients) and the metrics dictionary (with detached values)
         return projected_actions
