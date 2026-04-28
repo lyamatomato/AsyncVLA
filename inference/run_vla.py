@@ -429,6 +429,7 @@ class InferenceHandler:
         self.processor = processor
         self.action_pub = action_pub
         self.img = None
+        self.lan_inst = None
 
     def process_image(self, img_bytes):
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -437,45 +438,39 @@ class InferenceHandler:
         return transform(processed_tensor).to(self.device_id).to(torch.bfloat16)
 
     def img_callback(self, msg):
-        print("img received")
-        try:
-            payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
-            print("img payload keys:", payload.keys())
-            img_bytes = payload["curr_img"].encode("latin-1")
-            self.img = self.process_image(img_bytes)
-            print("img stored, shape:", tuple(self.img.shape))
-        except Exception:
-            traceback.print_exc()
+        payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
+        img_bytes = payload["curr_img"].encode("latin-1")
+        self.img = self.process_image(img_bytes)
+        self.maybe_run()
 
     def inst_callback(self, msg):
-        print("inst received")
-        # WARN: language instruction must arrive first
-        lan_inst = msg.payload.to_bytes().decode("utf-8")
-
-        print("self.img is None?", self.img is None)
-        if self.img is not None:
-            print("before inference.run")
-            inference = Inference(
-                vla=self.vla,
-                lan_inst_prompt=lan_inst,
-                img=self.img,
-                action_proj=self.action_proj,
-                device_id=self.device_id,
-                num_patches=self.num_patches,
-                action_tokenizer=self.action_tokenizer,
-                processor=self.processor
-            )
-            print("after inference.run")
-            actions = inference.run()
-            payload = {
-                "t_vla": time.time(),
-                "dtype": str(actions.dtype),
-                "shape": list(actions.shape),
-                "data": actions.reshape(-1).tolist(),
-            }
-            json_actions = json.dumps(payload)
-            self.action_pub.put(json_actions.encode("utf-8"))
-            print("action sent")
+        self.lan_inst = msg.payload.to_bytes().decode("utf-8")
+        self.maybe_run()
+    
+    def maybe_run(self):
+        if self.img is None or self.lan_inst is None:
+            return
+        print("before inference.run")
+        inference = Inference(
+            vla=self.vla,
+            lan_inst_prompt=self.lan_inst,
+            img=self.img,
+            action_proj=self.action_proj,
+            device_id=self.device_id,
+            num_patches=self.num_patches,
+            action_tokenizer=self.action_tokenizer,
+            processor=self.processor,
+        )
+        actions = inference.run()
+        print("after inference.run")
+        payload = {
+            "t_vla": time.time(),
+            "dtype": str(actions.dtype),
+            "shape": list(actions.shape),
+            "data": actions.reshape(-1).tolist(),
+        }
+        self.action_pub.put(json.dumps(payload).encode("utf-8"))
+        print("action sent")
 
 # ===============================================================
 # Main Entry
