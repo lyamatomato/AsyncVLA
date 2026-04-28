@@ -436,12 +436,14 @@ class InferenceHandler:
         return transform(processed_tensor).to(self.device_id).to(torch.bfloat16)
 
     def img_callback(self, msg):
+        print("img received")
         payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
 
         img_bytes = payload["curr_img"].encode("latin-1")
         self.img = self.process_image(img_bytes)
 
     def inst_callback(self, msg):
+        print("inst received")
         # WARN: language instruction must arrive first
         lan_inst = msg.payload.to_bytes().decode("utf-8")
 
@@ -481,8 +483,8 @@ def main():
 
         inference_handler = InferenceHandler(vla, action_proj, device_id, num_patches, action_tokenizer, processor, action_publisher)
 
-        z_session.declare_subscriber("robot/instruction", inference_handler.inst_callback)
-        z_session.declare_subscriber("camera/img_compressed", inference_handler.img_callback)
+        inst_subscriber = z_session.declare_subscriber("robot/instruction", inference_handler.inst_callback)
+        img_subscriber = z_session.declare_subscriber("camera/img_compressed", inference_handler.img_callback)
 
         while True:
             time.sleep(1)
