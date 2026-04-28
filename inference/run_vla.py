@@ -448,6 +448,7 @@ class InferenceHandler:
         lan_inst = msg.payload.to_bytes().decode("utf-8")
 
         if self.img is not None:
+            print("before inference.run")
             inference = Inference(
                 vla=self.vla,
                 lan_inst_prompt=lan_inst,
@@ -458,6 +459,7 @@ class InferenceHandler:
                 action_tokenizer=self.action_tokenizer,
                 processor=self.processor
             )
+            print("after inference.run")
             actions = inference.run()
             payload = {
                 "t_vla": time.time(),
