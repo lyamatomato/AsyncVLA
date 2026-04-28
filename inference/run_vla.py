@@ -21,6 +21,7 @@ import zenoh
 from functools import lru_cache
 
 import io
+import traceback
 
 import numpy as np
 import json
@@ -437,16 +438,21 @@ class InferenceHandler:
 
     def img_callback(self, msg):
         print("img received")
-        payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
-
-        img_bytes = payload["curr_img"].encode("latin-1")
-        self.img = self.process_image(img_bytes)
+        try:
+            payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
+            print("img payload keys:", payload.keys())
+            img_bytes = payload["curr_img"].encode("latin-1")
+            self.img = self.process_image(img_bytes)
+            print("img stored, shape:", tuple(self.img.shape))
+        except Exception:
+            traceback.print_exc()
 
     def inst_callback(self, msg):
         print("inst received")
         # WARN: language instruction must arrive first
         lan_inst = msg.payload.to_bytes().decode("utf-8")
 
+        print("self.img is None?", self.img is None)
         if self.img is not None:
             print("before inference.run")
             inference = Inference(
