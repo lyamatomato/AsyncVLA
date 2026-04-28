@@ -237,6 +237,8 @@ class InferenceHandler:
         self.shead = shead
         self.device_id = device_id
         self.curr_actions = None
+        self.past_img = None
+        self.curr_img = None
         self.cmd_pub = cmd_pub
 
     def action_callback(self, msg):
@@ -253,6 +255,8 @@ class InferenceHandler:
             .to(self.device_id)
             .to(torch.bfloat16)
         )
+
+        self.maybe_run()
     
     def process_image(self, img_bytes):
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -262,28 +266,27 @@ class InferenceHandler:
 
     def img_callback(self, msg):
         print("image received")
-        if self.curr_actions is None:
-            return
-
         payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
-
         past_jpeg_bytes = payload["past_img"].encode("latin-1")
         curr_jpeg_bytes = payload["curr_img"].encode("latin-1")
-
-        past_img = self.process_image(past_jpeg_bytes)
-        curr_img = self.process_image(curr_jpeg_bytes)
-
+        self.past_img = self.process_image(past_jpeg_bytes)
+        self.curr_img = self.process_image(curr_jpeg_bytes)
+        self.maybe_run()
+    
+    def maybe_run(self):
+        if self.curr_actions is None or self.past_img is None or self.curr_img is None:
+            return
         inference = Inference(
             projected_actions=self.curr_actions,
             shead=self.shead,
             device_id=self.device_id,
-            past_img=past_img,
-            curr_img=curr_img
+            past_img=self.past_img,
+            curr_img=self.curr_img,
         )
         lin_x, ang_z = inference.run_shead()
-        
         cmd_vel_payload = struct.pack("ddd", time.time(), float(lin_x), float(ang_z))
         self.cmd_pub.put(cmd_vel_payload)
+        print("cmd_vel sent")
 
 # ===============================================================
 # Main Entry
