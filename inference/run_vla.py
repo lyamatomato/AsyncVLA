@@ -20,6 +20,8 @@ import zenoh
 
 from functools import lru_cache
 
+import io
+
 import numpy as np
 import json
 from PIL import Image
@@ -28,6 +30,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as TF
 
 # ---------------------------
 # Custom Imports
@@ -94,9 +97,10 @@ def init_module(
 # Inference Class
 # ===============================================================
 class Inference:
-    def __init__(self, vla, lan_inst_prompt, action_proj, device_id, num_patches, action_tokenizer, processor):
+    def __init__(self, vla, lan_inst_prompt, img, action_proj, device_id, num_patches, action_tokenizer, processor):
         self.tick_rate = 3
         self.lan_inst_prompt = lan_inst_prompt
+        self.img = img
         self.vla = vla
         self.action_proj = action_proj
         self.device_id = device_id
@@ -127,18 +131,12 @@ class Inference:
     # AsyncVLA Inference
     # ----------------------------
     def run_asyncvla(self):
-        
-        # TODO: Zenoh subscribers
-        # Load current image
-        current_image_path = "./inference/past.png"
-        current_image_PIL = Image.open(current_image_path).convert("RGB").resize((224, 224), Image.BILINEAR)
-        
         # Run forward pass
         actions = self.run_forward_pass(
             vla=self.vla.eval(),
             action_proj=self.action_proj.eval(),
             noisy_action_projector=None,
-            current_image_PIL=current_image_PIL,
+            current_image_PIL=self.img,
             lan_inst=self.lan_inst_prompt,
             device_id=self.device_id,
             use_diffusion=False,
@@ -148,8 +146,6 @@ class Inference:
         self.count_id += 1
 
         return actions.detach().to(torch.float32).cpu().numpy()
-
-        # TODO: 
 
     # ----------------------------
     # Custom Collator
@@ -261,10 +257,10 @@ class Inference:
     # Run Forward Pass
     # ----------------------------
     def run_forward_pass(
-            self, 
+            self,
             vla,
-            action_proj, 
-            current_image_PIL, 
+            action_proj,
+            current_image_PIL,
             lan_inst,
             device_id,
             num_patches,
@@ -426,28 +422,44 @@ class InferenceHandler:
         self.action_tokenizer = action_tokenizer
         self.processor = processor
         self.action_pub = action_pub
+        self.img = None
+
+    def process_image(self, img_bytes):
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        img_tensor = TF.to_tensor(img)
+        processed_tensor = TF.resize(img_tensor, (96, 96)).unsqueeze(0)
+        return transform(processed_tensor).to(self.device_id).to(torch.bfloat16)
+
+    def img_callback(self, msg):
+        payload = json.loads(msg.payload.decode("utf-8"))
+
+        img_bytes = payload["curr_img"].encode("latin-1")
+        self.img = self.process_image(img_bytes)
 
     def inst_callback(self, msg):
-        lan_prompt = msg.payload.decode("utf-8")
+        # WARN: language instruction must arrive first
+        lan_inst = msg.payload.decode("utf-8")
 
-        inference = Inference(
-            vla=self.vla,
-            lan_inst_prompt=lan_prompt,
-            action_proj=self.action_proj,
-            device_id=self.device_id,
-            num_patches=self.num_patches,
-            action_tokenizer=self.action_tokenizer,
-            processor=self.processor
-        )
-        actions = inference.run()
-        payload = {
-            "t_vla": time.time(),
-            "dtype": str(actions.dtype),
-            "shape": list(actions.shape),
-            "data": actions.reshape(-1).tolist(),
-        }
-        json_actions = json.dumps(payload)
-        self.action_pub.put(json_actions.encode("utf-8"))
+        if self.img is not None:
+            inference = Inference(
+                vla=self.vla,
+                lan_inst_prompt=lan_inst,
+                img=self.img,
+                action_proj=self.action_proj,
+                device_id=self.device_id,
+                num_patches=self.num_patches,
+                action_tokenizer=self.action_tokenizer,
+                processor=self.processor
+            )
+            actions = inference.run()
+            payload = {
+                "t_vla": time.time(),
+                "dtype": str(actions.dtype),
+                "shape": list(actions.shape),
+                "data": actions.reshape(-1).tolist(),
+            }
+            json_actions = json.dumps(payload)
+            self.action_pub.put(json_actions.encode("utf-8"))
 
 # ===============================================================
 # Main Entry
@@ -464,10 +476,8 @@ def main():
 
         inference_handler = InferenceHandler(vla, action_proj, device_id, num_patches, action_tokenizer, processor, action_publisher)
 
-        inst_subscriber = z_session.declare_subscriber("/robot/instruction", inference_handler.inst_callback)
-        img_subscriber = z_session.declare_subscriber("/camera/img_compressed", inference_handler.img_callback)
-
-        # TODO: Handle grabbing current image for each inference call
+        z_session.declare_subscriber("/robot/instruction", inference_handler.inst_callback)
+        z_session.declare_subscriber("/camera/img_compressed", inference_handler.img_callback)
 
         while True:
             time.sleep(1)
