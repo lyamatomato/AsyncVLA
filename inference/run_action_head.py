@@ -295,12 +295,12 @@ def main():
         "connect/endpoints", '["tcp/127.0.0.1:7447", "tcp/127.0.0.1:7448"]'
     )
     with zenoh.open(z_conf) as z_session:
-        cmd_vel_publisher = z_session.declare_publisher("/vla/cmd_vel")
+        cmd_vel_publisher = z_session.declare_publisher("vla/cmd_vel")
 
         inference_handler = InferenceHandler(shead, device_id, cmd_vel_publisher)
 
-        action_subscriber = z_session.declare_subscriber("/vla/actions", inference_handler.action_callback)
-        img_subscriber = z_session.declare_subscriber("/camera/img_compressed", inference_handler.img_callback)
+        action_subscriber = z_session.declare_subscriber("vla/actions", inference_handler.action_callback)
+        img_subscriber = z_session.declare_subscriber("camera/img_compressed", inference_handler.img_callback)
 
         while True:
             time.sleep(1)

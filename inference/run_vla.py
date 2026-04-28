@@ -477,12 +477,12 @@ def main():
     z_conf = zenoh.Config()
     z_conf.insert_json5("listen/endpoints", '["tcp/0.0.0.0:7447"]')
     with zenoh.open(z_conf) as z_session:
-        action_publisher = z_session.declare_publisher("/vla/actions")
+        action_publisher = z_session.declare_publisher("vla/actions")
 
         inference_handler = InferenceHandler(vla, action_proj, device_id, num_patches, action_tokenizer, processor, action_publisher)
 
-        z_session.declare_subscriber("/robot/instruction", inference_handler.inst_callback)
-        z_session.declare_subscriber("/camera/img_compressed", inference_handler.img_callback)
+        z_session.declare_subscriber("robot/instruction", inference_handler.inst_callback)
+        z_session.declare_subscriber("camera/img_compressed", inference_handler.img_callback)
 
         while True:
             time.sleep(1)
