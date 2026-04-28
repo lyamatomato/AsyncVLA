@@ -206,10 +206,10 @@ class MLPResNet_idcat(nn.Module):
         self.layer_norm2 = nn.LayerNorm(hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, x):
+    def forward(self, x, taskid):
         # x: (batch_size, input_dim)
         x = self.layer_norm1(x)  # shape: (batch_size, input_dim)
-        x = torch.cat(x)
+        x = torch.cat((x, taskid.unsqueeze(1).unsqueeze(2).repeat(1, NUM_ACTIONS_CHUNK, 1)), axis=2)
         x = self.fc1(x)  # shape: (batch_size, hidden_dim) 
         x = self.relu(x)  # shape: (batch_size, hidden_dim)
         for block in self.mlp_resnet_blocks:
@@ -229,16 +229,16 @@ class Proj_Actiontokens(nn.Module):
         super().__init__()
         self.action_dim = action_dim
         # Split-mode projection path: no explicit task-id conditioning.
-        self.model = MLPResNet(
+        self.model = MLPResNet_idcat(
             num_blocks=2, input_dim=input_dim*ACTION_DIM, hidden_dim=hidden_dim, output_dim=action_dim
         )
 
-    def predict_action(self, actions_hidden_states):
+    def predict_action(self, actions_hidden_states, taskid):
         # actions_hidden_states: last hidden states of Transformer corresponding to action tokens in sequence
         # - shape: (batch_size, chunk_len * action_dim, hidden_dim)
         # ground_truth_actions: ground-truth actions
         # - shape: (batch_size, chunk_len, action_dim)
         batch_size = actions_hidden_states.shape[0]
         rearranged_actions_hidden_states = actions_hidden_states.reshape(batch_size, NUM_ACTIONS_CHUNK, -1)
-        action = self.model(rearranged_actions_hidden_states)
+        action = self.model(rearranged_actions_hidden_states, taskid)
         return action
