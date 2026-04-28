@@ -20,6 +20,7 @@ import yaml
 from typing import Optional, Tuple
 import io
 import struct
+import traceback
 
 import numpy as np
 from PIL import Image
@@ -266,14 +267,25 @@ class InferenceHandler:
 
     def img_callback(self, msg):
         print("image received")
-        payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
-        past_jpeg_bytes = payload["past_img"].encode("latin-1")
-        curr_jpeg_bytes = payload["curr_img"].encode("latin-1")
-        self.past_img = self.process_image(past_jpeg_bytes)
-        self.curr_img = self.process_image(curr_jpeg_bytes)
-        self.maybe_run()
+        try:
+            payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
+            print("img keys:", payload.keys())
+            past_jpeg_bytes = payload["past_img"].encode("latin-1")
+            curr_jpeg_bytes = payload["curr_img"].encode("latin-1")
+            self.past_img = self.process_image(past_jpeg_bytes)
+            self.curr_img = self.process_image(curr_jpeg_bytes)
+            print("stored imgs:", tuple(self.past_img.shape), tuple(self.curr_img.shape))
+            self.maybe_run()
+        except Exception:
+            traceback.print_exc()
     
     def maybe_run(self):
+        print(
+            "maybe_run ready:",
+            self.curr_actions is not None,
+            self.past_img is not None,
+            self.curr_img is not None,
+        )
         if self.curr_actions is None or self.past_img is None or self.curr_img is None:
             return
         inference = Inference(
