@@ -240,7 +240,7 @@ class InferenceHandler:
         self.cmd_pub = cmd_pub
 
     def action_callback(self, msg):
-        payload = json.loads(msg.payload.decode("utf-8"))
+        payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
 
         dtype_str = payload.get("dtype", "float32")
         np_dtype = np.dtype(dtype_str)
@@ -263,7 +263,7 @@ class InferenceHandler:
         if self.curr_actions is None:
             return
 
-        payload = json.loads(msg.payload.decode("utf-8"))
+        payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
 
         past_jpeg_bytes = payload["past_img"].encode("latin-1")
         curr_jpeg_bytes = payload["curr_img"].encode("latin-1")

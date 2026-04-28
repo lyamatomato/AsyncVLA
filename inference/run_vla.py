@@ -436,14 +436,14 @@ class InferenceHandler:
         return transform(processed_tensor).to(self.device_id).to(torch.bfloat16)
 
     def img_callback(self, msg):
-        payload = json.loads(msg.payload.decode("utf-8"))
+        payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
 
         img_bytes = payload["curr_img"].encode("latin-1")
         self.img = self.process_image(img_bytes)
 
     def inst_callback(self, msg):
         # WARN: language instruction must arrive first
-        lan_inst = msg.payload.decode("utf-8")
+        lan_inst = msg.payload.to_bytes().decode("utf-8")
 
         if self.img is not None:
             inference = Inference(
