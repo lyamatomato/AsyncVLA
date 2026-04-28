@@ -440,7 +440,7 @@ class InferenceHandler:
     def img_callback(self, msg):
         payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
         img_bytes = payload["curr_img"].encode("latin-1")
-        self.img = self.process_image(img_bytes)
+        self.img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         self.maybe_run()
 
     def inst_callback(self, msg):
