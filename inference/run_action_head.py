@@ -309,7 +309,7 @@ def main():
 
     z_conf = zenoh.Config()
     z_conf.insert_json5(
-        "connect/endpoints", '["tcp/127.0.0.1:7447"]'
+        "connect/endpoints", '["tcp/127.0.0.1:7447", "tcp/127.0.0.1:7448"]'
     )
     with zenoh.open(z_conf) as z_session:
         cmd_vel_publisher = z_session.declare_publisher("vla/cmd_vel")

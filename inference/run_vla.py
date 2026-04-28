@@ -481,7 +481,7 @@ def main():
     vla, action_proj, device_id, num_patches, action_tokenizer, processor = define_model(cfg)
 
     z_conf = zenoh.Config()
-    z_conf.insert_json5("connect/endpoints", '["tcp/127.0.0.1:7447"]')
+    z_conf.insert_json5("listen/endpoints", '["tcp/127.0.0.1:7447"]')
     with zenoh.open(z_conf) as z_session:
         action_publisher = z_session.declare_publisher("vla/actions")
 
