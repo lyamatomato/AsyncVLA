@@ -467,6 +467,7 @@ class InferenceHandler:
             }
             json_actions = json.dumps(payload)
             self.action_pub.put(json_actions.encode("utf-8"))
+            print("action sent")
 
 # ===============================================================
 # Main Entry

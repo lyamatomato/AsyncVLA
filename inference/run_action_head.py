@@ -240,6 +240,7 @@ class InferenceHandler:
         self.cmd_pub = cmd_pub
 
     def action_callback(self, msg):
+        print("action received")
         payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
 
         dtype_str = payload.get("dtype", "float32")
@@ -260,6 +261,7 @@ class InferenceHandler:
         return transform(processed_tensor).to(self.device_id).to(torch.bfloat16)
 
     def img_callback(self, msg):
+        print("image received")
         if self.curr_actions is None:
             return
 
