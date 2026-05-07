@@ -308,9 +308,9 @@ def main():
     shead, device_id = define_model(cfg)
 
     z_conf = zenoh.Config()
-    z_conf.insert_json5(
-        "connect/endpoints", '["tcp/127.0.0.1:7447", "tcp/127.0.0.1:7448"]'
-    )
+    z_conf.insert_json5("mode", '"client"')  
+    z_conf.insert_json5("connect/endpoints", '["tcp/127.0.0.1:7447"]')
+    z_conf.insert_json5("scouting/multicast/enabled", "false")
     with zenoh.open(z_conf) as z_session:
         cmd_vel_publisher = z_session.declare_publisher("vla/cmd_vel")
 
