@@ -131,10 +131,12 @@ class Inference:
         EPS = 1e-8
         DT = 1 / 3 # control interval
 
+        speed_gain = 0.1
+
         # Aready at target
         if np.abs(dx) < EPS and np.abs(dy) < EPS:
             linear_vel_value = 0
-            angular_vel_value = 1.0 * clip_angle(np.arctan2(hy, hx)) / DT # IMPLEMENT CLIP_ANGLE
+            angular_vel_value = 1.0 * clip_angle(np.arctan2(hy, hx)) / DT
         
         # Target is directly to the side
         elif np.abs(dx) < EPS:
@@ -146,8 +148,8 @@ class Inference:
             angular_vel_value = np.arctan(dy / dx) / DT
 
         # Clip velocities to be within limits
-        linear_vel_value = np.clip(linear_vel_value, 0, 0.5)
-        angular_vel_value = np.clip(angular_vel_value, -1.0, 1.0)
+        linear_vel_value = speed_gain* np.clip(linear_vel_value, 0, 0.5)
+        angular_vel_value = speed_gain * np.clip(angular_vel_value, -1.0, 1.0)
 
         # Velocity limitation - set this depending on known robot's velocity limits
         maxv, maxw = 0.3, 0.3
@@ -308,7 +310,7 @@ def main():
     shead, device_id = define_model(cfg)
 
     z_conf = zenoh.Config()
-    z_conf.insert_json5("mode", '"client"')  
+    z_conf.insert_json5("mode", '"client"')
     z_conf.insert_json5("connect/endpoints", '["tcp/127.0.0.1:7447"]')
     z_conf.insert_json5("scouting/multicast/enabled", "false")
     with zenoh.open(z_conf) as z_session:
