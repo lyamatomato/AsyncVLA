@@ -126,6 +126,7 @@ class Inference:
         chosen_waypoint = waypoints[0][waypoint_select].copy()
         chosen_waypoint[:2] *= metric_waypoint_spacing # convert to meters
         dx, dy, hx, hy = chosen_waypoint
+        dy = -dy
 
         # PD controller
         EPS = 1e-8
