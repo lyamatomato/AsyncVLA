@@ -433,6 +433,7 @@ class InferenceHandler:
         self.action_pub = action_pub
         self.img = None
         self.lan_inst = None
+        self.frame_id = None
 
     def process_image(self, img_bytes):
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -442,7 +443,8 @@ class InferenceHandler:
 
     def img_callback(self, msg):
         payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
-        img_bytes = payload["past_img"].encode("latin-1")
+        self.frame_id = payload.get("frame_id")
+        img_bytes = payload["curr_img"].encode("latin-1")
         self.img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         if not hasattr(self, '_saved'):
             self.img.save('/tmp/vla_input.jpg')
@@ -473,6 +475,7 @@ class InferenceHandler:
         print("after inference.run")
         payload = {
             "t_vla": time.time(),
+            "frame_id": self.frame_id,
             "dtype": str(actions.dtype),
             "shape": list(actions.shape),
             "data": actions.reshape(-1).tolist(),
