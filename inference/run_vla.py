@@ -165,7 +165,9 @@ class Inference:
             dataset_names = None
 
         if isinstance(pixel_values[0], torch.Tensor):
-            pixel_values = torch.stack(pixel_values)
+            # duplicate observation image. Model expects both observation and goal image, but masks out the goal if modality is set to 7.
+            stacked = torch.stack(pixel_values)
+            pixel_values = torch.cat([stacked, stacked], dim=1)
         else:
             raise ValueError(f"Unsupported `pixel_values` type: {type(pixel_values)}")
 
@@ -321,6 +323,7 @@ class Inference:
                 actions_hidden_states.detach(),
                 modality_id.to(torch.bfloat16),
             )
+        print(f"inst='{lan_inst}' proj_mean={projected_actions.mean().item():.4f}")
 
         # Return both the loss tensor (with gradients) and the metrics dictionary (with detached values)
         return projected_actions
@@ -344,7 +347,7 @@ class InferenceConfig:
     use_film: bool = False # Not used
 
     # Number of RGB images the vision backbone will process per step.
-    num_images_in_input: int = 1
+    num_images_in_input: int = 2
 
     # Whether to use LoRA to fine-tune the base VLA. Not used for inference.
     use_lora: bool = True
@@ -441,10 +444,15 @@ class InferenceHandler:
         payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
         img_bytes = payload["past_img"].encode("latin-1")
         self.img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        if not hasattr(self, '_saved'):
+            self.img.save('/tmp/vla_input.jpg')
+            self._saved = True
+            print("saved input image")
         self.maybe_run()
 
     def inst_callback(self, msg):
         self.lan_inst = msg.payload.to_bytes().decode("utf-8")
+        print(f"instruction received: '{self.lan_inst}'")
         self.maybe_run()
     
     def maybe_run(self):
@@ -492,6 +500,7 @@ def main():
         inst_subscriber = z_session.declare_subscriber("robot/instruction", inference_handler.inst_callback)
         img_subscriber = z_session.declare_subscriber("camera/img_compressed", inference_handler.img_callback)
 
+        print("VLA ready. Listening on Zenoh for camera/img_compressed and robot/instruction...", flush=True)
         while True:
             time.sleep(1)
 
