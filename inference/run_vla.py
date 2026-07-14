@@ -435,11 +435,11 @@ class InferenceHandler:
         self.lan_inst = None
         self.frame_id = None
 
-    def process_image(self, img_bytes):
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        img_tensor = TF.to_tensor(img)
-        processed_tensor = TF.resize(img_tensor, (96, 96)).unsqueeze(0)
-        return transform(processed_tensor).to(self.device_id).to(torch.bfloat16)
+    # def process_image(self, img_bytes):
+    #     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    #     img_tensor = TF.to_tensor(img)
+    #     processed_tensor = TF.resize(img_tensor, (224, 224)).unsqueeze(0)
+    #     return transform(processed_tensor).to(self.device_id).to(torch.bfloat16)
 
     def img_callback(self, msg):
         payload = json.loads(msg.payload.to_bytes().decode("utf-8"))
